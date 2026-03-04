@@ -3,9 +3,10 @@
 #![allow(dead_code)]
 
 use std::cmp::Ordering;
+use std::sync::OnceLock;
+
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::sync::OnceLock;
 
 const MIN_HRPN_LOOP: i32 = 3;
 const MAX_LOOP: i32 = 30;
@@ -181,22 +182,34 @@ fn params() -> &'static ThermoParams {
     })
 }
 
-const DANGLE_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/dangle.dh");
-const DANGLE_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/dangle.ds");
+const DANGLE_DH: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/dangle.dh");
+const DANGLE_DS: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/dangle.ds");
 const LOOPS_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/loops.dh");
 const LOOPS_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/loops.ds");
 const STACK_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/stack.dh");
 const STACK_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/stack.ds");
-const STACKMM_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/stackmm.dh");
-const STACKMM_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/stackmm.ds");
-const TETRALOOP_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tetraloop.dh");
-const TETRALOOP_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tetraloop.ds");
-const TRILOOP_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/triloop.dh");
-const TRILOOP_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/triloop.ds");
-const TSTACK_TM_INF_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack_tm_inf.ds");
-const TSTACK_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack.dh");
-const TSTACK2_DH: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack2.dh");
-const TSTACK2_DS: &str = include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack2.ds");
+const STACKMM_DH: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/stackmm.dh");
+const STACKMM_DS: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/stackmm.ds");
+const TETRALOOP_DH: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tetraloop.dh");
+const TETRALOOP_DS: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tetraloop.ds");
+const TRILOOP_DH: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/triloop.dh");
+const TRILOOP_DS: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/triloop.ds");
+const TSTACK_TM_INF_DS: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack_tm_inf.ds");
+const TSTACK_DH: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack.dh");
+const TSTACK2_DH: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack2.dh");
+const TSTACK2_DS: &str =
+    include_str!("../primer3-py/primer3/src/libprimer3/primer3_config/tstack2.ds");
 
 fn parse_double(token: &str) -> f64 {
     let t = token.trim();
@@ -2161,19 +2174,7 @@ fn find_tetraloop(entries: &[Tetraloop], num: usize, key: &[u8]) -> Option<f64> 
     }
 }
 
-#[pyfunction(name = "calc_hairpin")]
-#[pyo3(
-    signature = (
-        seq,
-        mv_conc=50.0,
-        dv_conc=0.0,
-        dntp_conc=0.8,
-        dna_conc=50.0,
-        temp_c=37.0,
-        max_loop=30,
-        output_structure=false
-    )
-)]
+#[pyfunction]
 fn calc_hairpin_py(
     py: Python<'_>,
     seq: &str,
@@ -2184,7 +2185,7 @@ fn calc_hairpin_py(
     temp_c: f64,
     max_loop: i32,
     output_structure: bool,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyDict>> {
     let args = ThalArgs {
         max_loop,
         mv: mv_conc,
@@ -2204,11 +2205,11 @@ fn calc_hairpin_py(
         Some(s) => out.set_item("ascii_structure", s)?,
         None => out.set_item("ascii_structure", py.None())?,
     };
-    Ok(out.into())
+    Ok(out.unbind())
 }
 
 #[pymodule]
-fn primer3_py_rs(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn primer3_py_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calc_hairpin_py, m)?)?;
     m.add("__doc__", "Rust hairpin thermodynamics (PyO3 bindings)")?;
     m.add("version", env!("CARGO_PKG_VERSION"))?;
