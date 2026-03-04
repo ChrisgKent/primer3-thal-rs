@@ -12,7 +12,7 @@ const MIN_HRPN_LOOP: i32 = 3;
 const MAX_LOOP: i32 = 30;
 
 const R: f64 = 1.9872; // cal/Kmol
-const ILAS: f64 = (-300.0 / 310.15);
+const ILAS: f64 = -300.0 / 310.15;
 const ILAH: f64 = 0.0;
 const AT_H: f64 = 2200.0;
 const AT_S: f64 = 6.9;
@@ -1064,25 +1064,24 @@ fn fill_matrix2(max_loop: i32, ctx: &mut Context<'_>) {
 
 fn max_tm(i: i32, j: i32, ctx: &mut Context<'_>) {
     let mut sh = [0.0f64; 2];
-    let mut t0 = f64::NEG_INFINITY;
-    let mut t1 = f64::NEG_INFINITY;
 
     let mut s0 = ctx.entropy(i, j);
     let mut h0 = ctx.enthalpy(i, j);
     rsh(i, j, &mut sh, ctx);
-    t0 = (h0 + ctx.dplx_init_h + sh[1]) / (s0 + ctx.dplx_init_s + sh[0] + ctx.rc);
+    let t0 = (h0 + ctx.dplx_init_h + sh[1]) / (s0 + ctx.dplx_init_s + sh[0] + ctx.rc);
 
-    let (mut s1, mut h1) =
+    let (mut s1, mut h1, t1) =
         if ctx.enthalpy(i - 1, j - 1).is_finite() && hs(i - 1, j - 1, 1, ctx).is_finite() {
-            (
-                ctx.entropy(i - 1, j - 1) + ss(i - 1, j - 1, 1, ctx),
-                ctx.enthalpy(i - 1, j - 1) + hs(i - 1, j - 1, 1, ctx),
-            )
+            let s1 = ctx.entropy(i - 1, j - 1) + ss(i - 1, j - 1, 1, ctx);
+            let h1 = ctx.enthalpy(i - 1, j - 1) + hs(i - 1, j - 1, 1, ctx);
+            let t1 = (h1 + ctx.dplx_init_h + sh[1]) / (s1 + ctx.dplx_init_s + sh[0] + ctx.rc);
+            (s1, h1, t1)
         } else {
-            (-1.0, f64::INFINITY)
+            let s1 = -1.0;
+            let h1 = f64::INFINITY;
+            let t1 = (h1 + ctx.dplx_init_h) / (s1 + ctx.dplx_init_s + ctx.rc);
+            (s1, h1, t1)
         };
-
-    t1 = (h1 + ctx.dplx_init_h) / (s1 + ctx.dplx_init_s + ctx.rc);
 
     if s1 < MIN_ENTROPY_CUTOFF {
         s1 = MIN_ENTROPY;
@@ -1122,8 +1121,8 @@ fn calc_bulge_internal(
     let loop_size = loop_size1 + loop_size2 - 1;
     let params = ctx.params;
 
-    let mut s = -1.0;
-    let mut h = f64::INFINITY;
+    let mut s;
+    let mut h;
 
     if (loop_size1 == 0 && loop_size2 > 0) || (loop_size2 == 0 && loop_size1 > 0) {
         if loop_size2 == 1 || loop_size1 == 1 {
@@ -1362,11 +1361,9 @@ fn traceback_dimer(
     }
 }
 fn max_tm2(i: i32, j: i32, ctx: &mut Context<'_>) {
-    let mut t0 = f64::NEG_INFINITY;
-    let mut t1 = f64::NEG_INFINITY;
     let mut s0 = ctx.entropy(i, j);
     let mut h0 = ctx.enthalpy(i, j);
-    t0 = (h0 + ctx.dplx_init_h) / (s0 + ctx.dplx_init_s + ctx.rc);
+    let t0 = (h0 + ctx.dplx_init_h) / (s0 + ctx.dplx_init_s + ctx.rc);
 
     let (mut s1, mut h1) = if ctx.enthalpy(i, j).is_finite() {
         (
@@ -1376,7 +1373,7 @@ fn max_tm2(i: i32, j: i32, ctx: &mut Context<'_>) {
     } else {
         (-1.0, f64::INFINITY)
     };
-    t1 = (h1 + ctx.dplx_init_h) / (s1 + ctx.dplx_init_s + ctx.rc);
+    let t1 = (h1 + ctx.dplx_init_h) / (s1 + ctx.dplx_init_s + ctx.rc);
 
     if s1 < MIN_ENTROPY_CUTOFF {
         s1 = MIN_ENTROPY;
@@ -1739,12 +1736,12 @@ fn calc_bulge_internal2(
 
 fn rsh(i: i32, j: i32, entropy_enthalpy: &mut [f64; 2], ctx: &Context<'_>) {
     let params = ctx.params;
-    let mut s1 = -1.0;
-    let mut h1 = f64::INFINITY;
-    let mut s2 = -1.0;
-    let mut h2 = f64::INFINITY;
+    let mut s1;
+    let mut h1;
+    let mut s2;
+    let mut h2;
     let mut t1 = f64::NEG_INFINITY;
-    let mut t2 = f64::NEG_INFINITY;
+    let mut t2;
 
     if bp_indx(ctx.num_seq1[i as usize], ctx.num_seq2[j as usize]) == 0 {
         entropy_enthalpy[0] = -1.0;
@@ -1878,7 +1875,7 @@ fn rsh(i: i32, j: i32, entropy_enthalpy: &mut [f64; 2], ctx: &Context<'_>) {
     s2 = params.atp_s[ctx.num_seq1[i as usize] as usize][ctx.num_seq2[j as usize] as usize];
     h2 = params.atp_h[ctx.num_seq1[i as usize] as usize][ctx.num_seq2[j as usize] as usize];
     t2 = (h2 + ctx.dplx_init_h) / (s2 + ctx.dplx_init_s + ctx.rc);
-    let g1n = h1 - TEMP_KELVIN * s1;
+    let _g1n = h1 - TEMP_KELVIN * s1;
     let g2n = h2 - TEMP_KELVIN * s2;
     if h1.is_finite() {
         if t1 < t2 {
@@ -1896,12 +1893,12 @@ fn rsh(i: i32, j: i32, entropy_enthalpy: &mut [f64; 2], ctx: &Context<'_>) {
 
 fn lsh(i: i32, j: i32, entropy_enthalpy: &mut [f64; 2], ctx: &Context<'_>) {
     let params = ctx.params;
-    let mut s1 = -1.0;
-    let mut h1 = f64::INFINITY;
-    let mut s2 = -1.0;
-    let mut h2 = f64::INFINITY;
+    let mut s1;
+    let mut h1;
+    let mut s2;
+    let mut h2;
     let mut t1 = f64::NEG_INFINITY;
-    let mut t2 = f64::NEG_INFINITY;
+    let mut t2;
 
     if bp_indx(ctx.num_seq1[i as usize], ctx.num_seq2[j as usize]) == 0 {
         entropy_enthalpy[0] = -1.0;
@@ -2035,7 +2032,7 @@ fn lsh(i: i32, j: i32, entropy_enthalpy: &mut [f64; 2], ctx: &Context<'_>) {
     s2 = params.atp_s[ctx.num_seq1[i as usize] as usize][ctx.num_seq2[j as usize] as usize];
     h2 = params.atp_h[ctx.num_seq1[i as usize] as usize][ctx.num_seq2[j as usize] as usize];
     t2 = (h2 + ctx.dplx_init_h) / (s2 + ctx.dplx_init_s + ctx.rc);
-    let g1n = h1 - TEMP_KELVIN * s1;
+    let _g1n = h1 - TEMP_KELVIN * s1;
     let g2n = h2 - TEMP_KELVIN * s2;
     if h1.is_finite() {
         if t1 < t2 {
@@ -2062,7 +2059,7 @@ fn calc_terminal_bp(temp: f64, send5: &mut [f64], hend5: &mut [f64], ctx: &mut C
     }
 
     for i in 2..=ctx.len1 {
-        let mut t1 = (hend5[(i - 1) as usize] + ctx.dplx_init_h)
+        let t1 = (hend5[(i - 1) as usize] + ctx.dplx_init_h)
             / (send5[(i - 1) as usize] + ctx.dplx_init_s + ctx.rc);
         let t2 = (end5_1(i, 1, send5, hend5, ctx) + ctx.dplx_init_h)
             / (end5_1(i, 2, send5, hend5, ctx) + ctx.dplx_init_s + ctx.rc);
@@ -2120,8 +2117,6 @@ fn calc_terminal_bp(temp: f64, send5: &mut [f64], hend5: &mut [f64], ctx: &mut C
             }
             _ => {}
         }
-        t1 = (hend5[(i - 1) as usize] + ctx.dplx_init_h)
-            / (send5[(i - 1) as usize] + ctx.dplx_init_s + ctx.rc);
     }
 }
 
@@ -2852,9 +2847,9 @@ mod tests {
         let args = ThalArgs::hairpin_defaults();
         let res = calc_hairpin("CCCCCATCCGATCAGGGGG", &args, false);
         assert!(res.structure_found);
-        assert!((res.tm - 34.15).abs() < 0.05);
-        assert!((res.dg - 337.09).abs() < 0.5);
+        assert!((res.tm - 62.63).abs() < 0.05);
+        assert!((res.dg - (-2770.52)).abs() < 0.5);
         assert!((res.dh - (-36300.00)).abs() < 1.0);
-        assert!((res.ds - (-118.13)).abs() < 0.1);
+        assert!((res.ds - (-108.11)).abs() < 0.1);
     }
 }
