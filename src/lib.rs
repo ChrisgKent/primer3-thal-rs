@@ -80,6 +80,29 @@ impl Default for ThermoResult {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct DimerResult {
+    pub structure_found: bool,
+    pub tm: f64,
+    pub dg: f64,
+    pub dh: f64,
+    pub ds: f64,
+    pub ascii_structure: Option<String>,
+}
+
+impl Default for DimerResult {
+    fn default() -> Self {
+        Self {
+            structure_found: false,
+            tm: 0.0,
+            dg: 0.0,
+            dh: 0.0,
+            ds: 0.0,
+            ascii_structure: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Triloop {
     loop_vals: [u8; 5],
@@ -595,14 +618,27 @@ fn to_loop_vals_6(s: &str) -> [u8; 6] {
     out
 }
 
+const fn build_str2int_lut() -> [u8; 256] {
+    let mut lut = [4u8; 256];
+    lut[b'A' as usize] = 0;
+    lut[b'a' as usize] = 0;
+    lut[b'0' as usize] = 0;
+    lut[b'C' as usize] = 1;
+    lut[b'c' as usize] = 1;
+    lut[b'1' as usize] = 1;
+    lut[b'G' as usize] = 2;
+    lut[b'g' as usize] = 2;
+    lut[b'2' as usize] = 2;
+    lut[b'T' as usize] = 3;
+    lut[b't' as usize] = 3;
+    lut[b'3' as usize] = 3;
+    lut
+}
+
+const STR2INT_LUT: [u8; 256] = build_str2int_lut();
+
 fn str2int(c: u8) -> u8 {
-    match c.to_ascii_uppercase() {
-        b'A' | b'0' => 0,
-        b'C' | b'1' => 1,
-        b'G' | b'2' => 2,
-        b'T' | b'3' => 3,
-        _ => 4,
-    }
+    STR2INT_LUT[c as usize]
 }
 
 fn is_positive(x: f64) -> bool {
@@ -622,6 +658,14 @@ fn equal(a: f64, b: f64) -> bool {
 
 fn bp_indx(a: u8, b: u8) -> i32 {
     BPI[a as usize][b as usize]
+}
+
+fn at_penalty_s(a: u8, b: u8, ctx: &Context<'_>) -> f64 {
+    ctx.params.atp_s[a as usize][b as usize]
+}
+
+fn at_penalty_h(a: u8, b: u8, ctx: &Context<'_>) -> f64 {
+    ctx.params.atp_h[a as usize][b as usize]
 }
 
 fn salt_correct_s(mv: f64, dv: f64, dntp: f64) -> f64 {
@@ -648,6 +692,57 @@ struct Context<'a> {
     dplx_init_s: f64,
     dplx_init_h: f64,
     rc: f64,
+}
+
+fn init_matrix(ctx: &mut Context<'_>) {
+    let len3 = ctx.len3;
+    for i in 1..=ctx.len1 {
+        let base = ((i - 1) * len3) as usize;
+        for j in 1..=ctx.len2 {
+            let id = base + (j - 1) as usize;
+            if bp_indx(ctx.num_seq1[i as usize], ctx.num_seq2[j as usize]) == 0 {
+                ctx.enthalpy_dpt[id] = f64::INFINITY;
+                ctx.entropy_dpt[id] = -1.0;
+            } else {
+                ctx.enthalpy_dpt[id] = 0.0;
+                ctx.entropy_dpt[id] = MIN_ENTROPY;
+            }
+        }
+    }
+}
+
+fn symmetry_thermo(seq: &[u8]) -> bool {
+    let len = seq.len();
+    if len % 2 == 1 {
+        return false;
+    }
+    let mut i = 0usize;
+    let mut j = len.saturating_sub(1);
+    let half = len / 2;
+    while i < half {
+        let s = (seq[i] as char).to_ascii_uppercase() as u8;
+        let e = (seq[j] as char).to_ascii_uppercase() as u8;
+        if (s == b'A' && e != b'T')
+            || (s == b'T' && e != b'A')
+            || (e == b'A' && s != b'T')
+            || (e == b'T' && s != b'A')
+        {
+            return false;
+        }
+        if (s == b'C' && e != b'G')
+            || (s == b'G' && e != b'C')
+            || (e == b'C' && s != b'G')
+            || (e == b'G' && s != b'C')
+        {
+            return false;
+        }
+        i += 1;
+        if j == 0 {
+            break;
+        }
+        j -= 1;
+    }
+    true
 }
 
 impl<'a> Context<'a> {
@@ -684,14 +779,13 @@ pub fn calc_hairpin(seq: &str, args: &ThalArgs, output_structure: bool) -> Therm
 
     let params = params();
 
-    let mut oligo1: Vec<u8> = seq
+    let oligo1: Vec<u8> = seq
         .as_bytes()
         .iter()
         .map(|b| b.to_ascii_uppercase())
         .collect();
-    let mut oligo2 = oligo1.clone();
 
-    let len2 = oligo2.len() as i32;
+    let len2 = oligo1.len() as i32;
     let len3 = len2 - 1;
 
     let mut num_seq1 = vec![4u8; (len1 as usize) + 2];
@@ -701,7 +795,7 @@ pub fn calc_hairpin(seq: &str, args: &ThalArgs, output_structure: bool) -> Therm
         num_seq1[i as usize] = str2int(oligo1[(i - 1) as usize]);
     }
     for i in 1..=len2 {
-        num_seq2[i as usize] = str2int(oligo2[(i - 1) as usize]);
+        num_seq2[i as usize] = str2int(oligo1[(i - 1) as usize]);
     }
 
     let salt_correction = salt_correct_s(args.mv, args.dv, args.dntp);
@@ -761,17 +855,179 @@ pub fn calc_hairpin(seq: &str, args: &ThalArgs, output_structure: bool) -> Therm
     result
 }
 
-fn init_matrix2(ctx: &mut Context<'_>) {
+struct PreparedDimer {
+    oligo1: Vec<u8>,
+    oligo2: Vec<u8>,
+    num_seq1: Vec<u8>,
+    num_seq2: Vec<u8>,
+    len1: i32,
+    len2: i32,
+    len3: i32,
+}
+
+fn prepare_dimer_sequences(seq1: &str, seq2: &str) -> Option<PreparedDimer> {
+    if seq1.is_empty() || seq2.is_empty() {
+        return None;
+    }
+    let len1 = seq1.len() as i32;
+    let len2 = seq2.len() as i32;
+    if len1 > THAL_MAX_SEQ || len2 > THAL_MAX_SEQ {
+        return None;
+    }
+    if len1 > THAL_MAX_ALIGN || len2 > THAL_MAX_ALIGN {
+        return None;
+    }
+
+    let oligo1: Vec<u8> = seq1
+        .as_bytes()
+        .iter()
+        .map(|b| b.to_ascii_uppercase())
+        .collect();
+    let mut oligo2: Vec<u8> = seq2
+        .as_bytes()
+        .iter()
+        .map(|b| b.to_ascii_uppercase())
+        .collect();
+    // Match thalflex: reverse oligo2 for 3'->5' direction in dimer DP.
+    oligo2.reverse();
+
+    let mut num_seq1 = vec![4u8; (len1 as usize) + 2];
+    let mut num_seq2 = vec![4u8; (len2 as usize) + 2];
+    for (i, base) in oligo1.iter().enumerate() {
+        num_seq1[i + 1] = str2int(*base);
+    }
+    for (i, base) in oligo2.iter().enumerate() {
+        num_seq2[i + 1] = str2int(*base);
+    }
+
+    Some(PreparedDimer {
+        oligo1,
+        oligo2,
+        num_seq1,
+        num_seq2,
+        len1,
+        len2,
+        len3: len2,
+    })
+}
+
+fn find_best_any(ctx: &Context<'_>) -> Option<(i32, i32)> {
+    let mut best_i = 0;
+    let mut best_j = 0;
+    let mut best_g = f64::INFINITY;
+    let mut sh = [0.0f64; 2];
+    let temp = TEMP_KELVIN;
+    let dplx_h = ctx.dplx_init_h;
+    let dplx_s = ctx.dplx_init_s;
+
     for i in 1..=ctx.len1 {
+        for j in 1..=ctx.len2 {
+            let enthalpy = ctx.enthalpy(i, j);
+            let entropy = ctx.entropy(i, j);
+            rsh(i, j, &mut sh, ctx);
+            sh[0] += SMALL_NON_ZERO;
+            sh[1] += SMALL_NON_ZERO;
+            let g1 = (enthalpy + sh[1] + dplx_h) - temp * (entropy + sh[0] + dplx_s);
+            if g1 < best_g {
+                best_g = g1;
+                best_i = i;
+                best_j = j;
+            }
+        }
+    }
+
+    if best_g.is_finite() {
+        Some((best_i, best_j))
+    } else {
+        None
+    }
+}
+
+pub fn calc_heterodimer(
+    seq1: &str,
+    seq2: &str,
+    args: &ThalArgs,
+    output_structure: bool,
+) -> DimerResult {
+    let mut result = DimerResult::default();
+    let prepared = match prepare_dimer_sequences(seq1, seq2) {
+        Some(prepared) => prepared,
+        None => return result,
+    };
+
+    let params = params();
+    let salt_correction = salt_correct_s(args.mv, args.dv, args.dntp);
+    let dplx_init_h = 200.0;
+    let dplx_init_s = -5.7;
+    let rc = if symmetry_thermo(seq1.as_bytes()) && symmetry_thermo(seq2.as_bytes()) {
+        R * (args.dna_conc / 1_000_000_000.0).ln()
+    } else {
+        R * (args.dna_conc / 4_000_000_000.0).ln()
+    };
+
+    let mut entropy_dpt = vec![0.0f64; (prepared.len1 * prepared.len2) as usize];
+    let mut enthalpy_dpt = vec![0.0f64; (prepared.len1 * prepared.len2) as usize];
+
+    let mut ctx = Context {
+        params,
+        num_seq1: &prepared.num_seq1,
+        num_seq2: &prepared.num_seq2,
+        len1: prepared.len1,
+        len2: prepared.len2,
+        len3: prepared.len3,
+        entropy_dpt: &mut entropy_dpt,
+        enthalpy_dpt: &mut enthalpy_dpt,
+        dplx_init_s,
+        dplx_init_h,
+        rc,
+    };
+
+    init_matrix(&mut ctx);
+    fill_matrix(args.max_loop, &mut ctx);
+
+    let mut sh = [0.0f64; 2];
+    let (best_i, best_j) = find_best_any(&ctx).unwrap_or((1, 1));
+
+    rsh(best_i, best_j, &mut sh, &ctx);
+    let dh = ctx.enthalpy(best_i, best_j) + sh[1] + ctx.dplx_init_h;
+    let ds = ctx.entropy(best_i, best_j) + sh[0] + ctx.dplx_init_s;
+
+    if !ctx.enthalpy(best_i, best_j).is_finite() {
+        return result;
+    }
+
+    let mut ps1 = vec![0i32; prepared.len1 as usize];
+    let mut ps2 = vec![0i32; prepared.len2 as usize];
+    traceback_dimer(best_i, best_j, &mut ps1, &mut ps2, args.max_loop, &mut ctx);
+
+    let (tm, ds_adj, dh_adj, dg) =
+        calc_dimer_values(&ps1, &ps2, dh, ds, args.temp, salt_correction, rc);
+
+    result.structure_found = true;
+    result.tm = tm;
+    result.ds = ds_adj;
+    result.dh = dh_adj;
+    result.dg = dg;
+    if output_structure {
+        // TODO: Port drawDimer for ASCII structure output
+    }
+    result
+}
+
+fn init_matrix2(ctx: &mut Context<'_>) {
+    let len3 = ctx.len3;
+    for i in 1..=ctx.len1 {
+        let base = ((i - 1) * len3) as usize;
         for j in i..=ctx.len2 {
+            let id = base + (j - 1) as usize;
             if (j - i) < MIN_HRPN_LOOP + 1
                 || bp_indx(ctx.num_seq1[i as usize], ctx.num_seq1[j as usize]) == 0
             {
-                ctx.set_enthalpy(i, j, f64::INFINITY);
-                ctx.set_entropy(i, j, -1.0);
+                ctx.enthalpy_dpt[id] = f64::INFINITY;
+                ctx.entropy_dpt[id] = -1.0;
             } else {
-                ctx.set_enthalpy(i, j, 0.0);
-                ctx.set_entropy(i, j, MIN_ENTROPY);
+                ctx.enthalpy_dpt[id] = 0.0;
+                ctx.entropy_dpt[id] = MIN_ENTROPY;
             }
         }
     }
@@ -779,10 +1035,12 @@ fn init_matrix2(ctx: &mut Context<'_>) {
 
 fn fill_matrix2(max_loop: i32, ctx: &mut Context<'_>) {
     let mut sh = [0.0f64; 2];
+    let len3 = ctx.len3;
     for j in 2..=ctx.len2 {
         let mut i = j - MIN_HRPN_LOOP - 1;
         while i >= 1 {
-            if ctx.enthalpy(i, j).is_finite() {
+            let id = ((i - 1) * len3 + (j - 1)) as usize;
+            if ctx.enthalpy_dpt[id].is_finite() {
                 sh[0] = -1.0;
                 sh[1] = f64::INFINITY;
                 max_tm2(i, j, ctx);
@@ -795,8 +1053,8 @@ fn fill_matrix2(max_loop: i32, ctx: &mut Context<'_>) {
                         sh[0] = MIN_ENTROPY;
                         sh[1] = 0.0;
                     }
-                    ctx.set_entropy(i, j, sh[0]);
-                    ctx.set_enthalpy(i, j, sh[1]);
+                    ctx.entropy_dpt[id] = sh[0];
+                    ctx.enthalpy_dpt[id] = sh[1];
                 }
             }
             i -= 1;
@@ -804,6 +1062,305 @@ fn fill_matrix2(max_loop: i32, ctx: &mut Context<'_>) {
     }
 }
 
+fn max_tm(i: i32, j: i32, ctx: &mut Context<'_>) {
+    let mut sh = [0.0f64; 2];
+    let mut t0 = f64::NEG_INFINITY;
+    let mut t1 = f64::NEG_INFINITY;
+
+    let mut s0 = ctx.entropy(i, j);
+    let mut h0 = ctx.enthalpy(i, j);
+    rsh(i, j, &mut sh, ctx);
+    t0 = (h0 + ctx.dplx_init_h + sh[1]) / (s0 + ctx.dplx_init_s + sh[0] + ctx.rc);
+
+    let (mut s1, mut h1) =
+        if ctx.enthalpy(i - 1, j - 1).is_finite() && hs(i - 1, j - 1, 1, ctx).is_finite() {
+            (
+                ctx.entropy(i - 1, j - 1) + ss(i - 1, j - 1, 1, ctx),
+                ctx.enthalpy(i - 1, j - 1) + hs(i - 1, j - 1, 1, ctx),
+            )
+        } else {
+            (-1.0, f64::INFINITY)
+        };
+
+    t1 = (h1 + ctx.dplx_init_h) / (s1 + ctx.dplx_init_s + ctx.rc);
+
+    if s1 < MIN_ENTROPY_CUTOFF {
+        s1 = MIN_ENTROPY;
+        h1 = 0.0;
+    }
+    if s0 < MIN_ENTROPY_CUTOFF {
+        s0 = MIN_ENTROPY;
+        h0 = 0.0;
+    }
+
+    if t1 > t0 {
+        ctx.set_entropy(i, j, s1);
+        ctx.set_enthalpy(i, j, h1);
+    } else {
+        ctx.set_entropy(i, j, s0);
+        ctx.set_enthalpy(i, j, h0);
+    }
+}
+
+fn calc_bulge_internal(
+    i: i32,
+    j: i32,
+    ii: i32,
+    jj: i32,
+    entropy_enthalpy: &mut [f64; 2],
+    traceback: i32,
+    max_loop: i32,
+    ctx: &mut Context<'_>,
+) {
+    let loop_size1 = ii - i - 1;
+    let loop_size2 = jj - j - 1;
+    if loop_size1 + loop_size2 > max_loop {
+        entropy_enthalpy[0] = -1.0;
+        entropy_enthalpy[1] = f64::INFINITY;
+        return;
+    }
+    let loop_size = loop_size1 + loop_size2 - 1;
+    let params = ctx.params;
+
+    let mut s = -1.0;
+    let mut h = f64::INFINITY;
+
+    if (loop_size1 == 0 && loop_size2 > 0) || (loop_size2 == 0 && loop_size1 > 0) {
+        if loop_size2 == 1 || loop_size1 == 1 {
+            h = params.bulge_loop_enthalpies[loop_size as usize]
+                + params.stack_enthalpies[ctx.num_seq1[i as usize] as usize]
+                    [ctx.num_seq1[ii as usize] as usize][ctx.num_seq2[j as usize] as usize]
+                    [ctx.num_seq2[jj as usize] as usize];
+            s = params.bulge_loop_entropies[loop_size as usize]
+                + params.stack_entropies[ctx.num_seq1[i as usize] as usize]
+                    [ctx.num_seq1[ii as usize] as usize][ctx.num_seq2[j as usize] as usize]
+                    [ctx.num_seq2[jj as usize] as usize];
+            if is_positive(h) || is_positive(s) {
+                h = f64::INFINITY;
+                s = -1.0;
+            }
+            h += ctx.enthalpy(i, j);
+            s += ctx.entropy(i, j);
+            if !h.is_finite() {
+                h = f64::INFINITY;
+                s = -1.0;
+            }
+            let mut sh = [0.0f64; 2];
+            rsh(ii, jj, &mut sh, ctx);
+            let g1 = h + sh[1] - TEMP_KELVIN * (s + sh[0]);
+            let g2 = ctx.enthalpy(ii, jj) + sh[1] - TEMP_KELVIN * (ctx.entropy(ii, jj) + sh[0]);
+            if (g1 < g2) || (traceback == 1) {
+                entropy_enthalpy[0] = s;
+                entropy_enthalpy[1] = h;
+            }
+        } else {
+            h = params.bulge_loop_enthalpies[loop_size as usize]
+                + at_penalty_h(ctx.num_seq1[i as usize], ctx.num_seq2[j as usize], ctx)
+                + at_penalty_h(ctx.num_seq1[ii as usize], ctx.num_seq2[jj as usize], ctx);
+            h += ctx.enthalpy(i, j);
+            s = params.bulge_loop_entropies[loop_size as usize]
+                + at_penalty_s(ctx.num_seq1[i as usize], ctx.num_seq2[j as usize], ctx)
+                + at_penalty_s(ctx.num_seq1[ii as usize], ctx.num_seq2[jj as usize], ctx);
+            s += ctx.entropy(i, j);
+            if !h.is_finite() {
+                h = f64::INFINITY;
+                s = -1.0;
+            }
+            if is_positive(h) && is_positive(s) {
+                h = f64::INFINITY;
+                s = -1.0;
+            }
+            let mut sh = [0.0f64; 2];
+            rsh(ii, jj, &mut sh, ctx);
+            let g1 = h + sh[1] - TEMP_KELVIN * (s + sh[0]);
+            let g2 = ctx.enthalpy(ii, jj) + sh[1] - TEMP_KELVIN * (ctx.entropy(ii, jj) + sh[0]);
+            if (g1 < g2) || (traceback == 1) {
+                entropy_enthalpy[0] = s;
+                entropy_enthalpy[1] = h;
+            }
+        }
+    } else if loop_size1 == 1 && loop_size2 == 1 {
+        s = params.stackint2_entropies[ctx.num_seq1[i as usize] as usize]
+            [ctx.num_seq1[(i + 1) as usize] as usize][ctx.num_seq2[j as usize] as usize]
+            [ctx.num_seq2[(j + 1) as usize] as usize]
+            + params.stackint2_entropies[ctx.num_seq2[jj as usize] as usize]
+                [ctx.num_seq2[(jj - 1) as usize] as usize][ctx.num_seq1[ii as usize] as usize]
+                [ctx.num_seq1[(ii - 1) as usize] as usize];
+        s += ctx.entropy(i, j);
+        h = params.stackint2_enthalpies[ctx.num_seq1[i as usize] as usize]
+            [ctx.num_seq1[(i + 1) as usize] as usize][ctx.num_seq2[j as usize] as usize]
+            [ctx.num_seq2[(j + 1) as usize] as usize]
+            + params.stackint2_enthalpies[ctx.num_seq2[jj as usize] as usize]
+                [ctx.num_seq2[(jj - 1) as usize] as usize][ctx.num_seq1[ii as usize] as usize]
+                [ctx.num_seq1[(ii - 1) as usize] as usize];
+        h += ctx.enthalpy(i, j);
+        if !h.is_finite() {
+            h = f64::INFINITY;
+            s = -1.0;
+        }
+        if is_positive(h) && is_positive(s) {
+            h = f64::INFINITY;
+            s = -1.0;
+        }
+        let mut sh = [0.0f64; 2];
+        rsh(ii, jj, &mut sh, ctx);
+        let g1 = h + sh[1] - TEMP_KELVIN * (s + sh[0]);
+        let g2 = ctx.enthalpy(ii, jj) + sh[1] - TEMP_KELVIN * (ctx.entropy(ii, jj) + sh[0]);
+        if (g1 < g2) || (traceback == 1) {
+            entropy_enthalpy[0] = s;
+            entropy_enthalpy[1] = h;
+        }
+        return;
+    } else {
+        h = params.interior_loop_enthalpies[loop_size as usize]
+            + params.tstack_enthalpies[ctx.num_seq1[i as usize] as usize]
+                [ctx.num_seq1[(i + 1) as usize] as usize][ctx.num_seq2[j as usize] as usize]
+                [ctx.num_seq2[(j + 1) as usize] as usize]
+            + params.tstack_enthalpies[ctx.num_seq2[jj as usize] as usize]
+                [ctx.num_seq2[(jj - 1) as usize] as usize][ctx.num_seq1[ii as usize] as usize]
+                [ctx.num_seq1[(ii - 1) as usize] as usize]
+            + (ILAH * (loop_size1 - loop_size2).abs() as f64);
+        h += ctx.enthalpy(i, j);
+
+        s = params.interior_loop_entropies[loop_size as usize]
+            + params.tstack_entropies[ctx.num_seq1[i as usize] as usize]
+                [ctx.num_seq1[(i + 1) as usize] as usize][ctx.num_seq2[j as usize] as usize]
+                [ctx.num_seq2[(j + 1) as usize] as usize]
+            + params.tstack_entropies[ctx.num_seq2[jj as usize] as usize]
+                [ctx.num_seq2[(jj - 1) as usize] as usize][ctx.num_seq1[ii as usize] as usize]
+                [ctx.num_seq1[(ii - 1) as usize] as usize]
+            + (ILAS * (loop_size1 - loop_size2).abs() as f64);
+        s += ctx.entropy(i, j);
+        if !h.is_finite() {
+            h = f64::INFINITY;
+            s = -1.0;
+        }
+        if is_positive(h) && is_positive(s) {
+            h = f64::INFINITY;
+            s = -1.0;
+        }
+        let mut sh = [0.0f64; 2];
+        rsh(ii, jj, &mut sh, ctx);
+        let g1 = h + sh[1] - TEMP_KELVIN * (s + sh[0]);
+        let g2 = ctx.enthalpy(ii, jj) + sh[1] - TEMP_KELVIN * (ctx.entropy(ii, jj) + sh[0]);
+        if (g1 < g2) || (traceback == 1) {
+            entropy_enthalpy[0] = s;
+            entropy_enthalpy[1] = h;
+        }
+    }
+}
+
+fn fill_matrix(max_loop: i32, ctx: &mut Context<'_>) {
+    let mut sh = [0.0f64; 2];
+    for i in 1..=ctx.len1 {
+        for j in 1..=ctx.len2 {
+            if ctx.enthalpy(i, j).is_finite() {
+                sh[0] = -1.0;
+                sh[1] = f64::INFINITY;
+                lsh(i, j, &mut sh, ctx);
+                if sh[1].is_finite() {
+                    ctx.set_entropy(i, j, sh[0]);
+                    ctx.set_enthalpy(i, j, sh[1]);
+                }
+                if i > 1 && j > 1 {
+                    max_tm(i, j, ctx);
+                    for d in 3..=max_loop + 2 {
+                        let mut ii = i - 1;
+                        let mut jj = -ii - d + (j + i);
+                        if jj < 1 {
+                            ii -= (jj - 1).abs();
+                            jj = 1;
+                        }
+                        while ii > 0 && jj < j {
+                            if ctx.enthalpy(ii, jj).is_finite() {
+                                sh[0] = -1.0;
+                                sh[1] = f64::INFINITY;
+                                calc_bulge_internal(ii, jj, i, j, &mut sh, 0, max_loop, ctx);
+                                if sh[0] < MIN_ENTROPY_CUTOFF {
+                                    sh[0] = MIN_ENTROPY;
+                                    sh[1] = 0.0;
+                                }
+                                if sh[1].is_finite() {
+                                    ctx.set_enthalpy(i, j, sh[1]);
+                                    ctx.set_entropy(i, j, sh[0]);
+                                }
+                            }
+                            ii -= 1;
+                            jj += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn traceback_dimer(
+    i0: i32,
+    j0: i32,
+    ps1: &mut [i32],
+    ps2: &mut [i32],
+    max_loop: i32,
+    ctx: &mut Context<'_>,
+) {
+    let mut i = i0;
+    let mut j = j0;
+    let mut sh = [0.0f64; 2];
+    ps1[(i - 1) as usize] = j;
+    ps2[(j - 1) as usize] = i;
+    loop {
+        sh[0] = -1.0;
+        sh[1] = f64::INFINITY;
+        lsh(i, j, &mut sh, ctx);
+        if equal(ctx.entropy(i, j), sh[0]) && equal(ctx.enthalpy(i, j), sh[1]) {
+            break;
+        }
+        let mut done = false;
+        if i > 1
+            && j > 1
+            && equal(
+                ctx.entropy(i, j),
+                ss(i - 1, j - 1, 1, ctx) + ctx.entropy(i - 1, j - 1),
+            )
+            && equal(
+                ctx.enthalpy(i, j),
+                hs(i - 1, j - 1, 1, ctx) + ctx.enthalpy(i - 1, j - 1),
+            )
+        {
+            i -= 1;
+            j -= 1;
+            ps1[(i - 1) as usize] = j;
+            ps2[(j - 1) as usize] = i;
+            done = true;
+        }
+        for d in 3..=max_loop + 2 {
+            if done {
+                break;
+            }
+            let mut ii = i - 1;
+            let mut jj = -ii - d + (j + i);
+            if jj < 1 {
+                ii -= (jj - 1).abs();
+                jj = 1;
+            }
+            while !done && ii > 0 && jj < j {
+                sh[0] = -1.0;
+                sh[1] = f64::INFINITY;
+                calc_bulge_internal(ii, jj, i, j, &mut sh, 1, max_loop, ctx);
+                if equal(ctx.entropy(i, j), sh[0]) && equal(ctx.enthalpy(i, j), sh[1]) {
+                    i = ii;
+                    j = jj;
+                    ps1[(i - 1) as usize] = j;
+                    ps2[(j - 1) as usize] = i;
+                    done = true;
+                    break;
+                }
+                ii -= 1;
+                jj += 1;
+            }
+        }
+    }
+}
 fn max_tm2(i: i32, j: i32, ctx: &mut Context<'_>) {
     let mut t0 = f64::NEG_INFINITY;
     let mut t1 = f64::NEG_INFINITY;
@@ -1822,10 +2379,44 @@ fn calc_hairpin_values(
             n += 1;
         }
     }
-    let t = (mh / (ms + (((n as f64 / 2.0) - 1.0) * salt_correction))) - ABSOLUTE_ZERO;
-    let mg = mh - (temp * (ms + (((n as f64 / 2.0) - 1.0) * salt_correction)));
-    let ms_adj = ms + (((n as f64 / 2.0) - 1.0) * salt_correction);
+    // Match C integer division for N/2 (truncates for odd N).
+    let n_half = (n / 2) as f64;
+    let salt_term = (n_half - 1.0) * salt_correction;
+    let t = (mh / (ms + salt_term)) - ABSOLUTE_ZERO;
+    let mg = mh - (temp * (ms + salt_term));
+    let ms_adj = ms + salt_term;
     (t, ms_adj, mh, mg)
+}
+
+fn calc_dimer_values(
+    ps1: &[i32],
+    ps2: &[i32],
+    h: f64,
+    s: f64,
+    temp: f64,
+    salt_correction: f64,
+    rc: f64,
+) -> (f64, f64, f64, f64) {
+    if !temp.is_finite() {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    let mut n = 0i32;
+    for v in ps1 {
+        if *v > 0 {
+            n += 1;
+        }
+    }
+    for v in ps2 {
+        if *v > 0 {
+            n += 1;
+        }
+    }
+    let n = (n / 2) - 1;
+    let n_f = n as f64;
+    let t = (h / (s + (n_f * salt_correction) + rc)) - ABSOLUTE_ZERO;
+    let g = h - (temp * (s + (n_f * salt_correction)));
+    let s_adj = s + (n_f * salt_correction);
+    (t, s_adj, h, g)
 }
 
 fn draw_hairpin(
@@ -2208,9 +2799,45 @@ fn calc_hairpin_py(
     Ok(out.unbind())
 }
 
+#[pyfunction]
+fn calc_heterodimer_py(
+    py: Python<'_>,
+    seq1: &str,
+    seq2: &str,
+    mv_conc: f64,
+    dv_conc: f64,
+    dntp_conc: f64,
+    dna_conc: f64,
+    temp_c: f64,
+    max_loop: i32,
+    output_structure: bool,
+) -> PyResult<Py<PyDict>> {
+    let args = ThalArgs {
+        max_loop,
+        mv: mv_conc,
+        dv: dv_conc,
+        dntp: dntp_conc,
+        dna_conc,
+        temp: temp_c + 273.15,
+    };
+    let res = calc_heterodimer(seq1, seq2, &args, output_structure);
+    let out = PyDict::new(py);
+    out.set_item("structure_found", res.structure_found)?;
+    out.set_item("tm", res.tm)?;
+    out.set_item("ds", res.ds)?;
+    out.set_item("dh", res.dh)?;
+    out.set_item("dg", res.dg)?;
+    match res.ascii_structure {
+        Some(s) => out.set_item("ascii_structure", s)?,
+        None => out.set_item("ascii_structure", py.None())?,
+    };
+    Ok(out.unbind())
+}
+
 #[pymodule]
 fn primer3_py_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calc_hairpin_py, m)?)?;
+    m.add_function(wrap_pyfunction!(calc_heterodimer_py, m)?)?;
     m.add("__doc__", "Rust hairpin thermodynamics (PyO3 bindings)")?;
     m.add("version", env!("CARGO_PKG_VERSION"))?;
     Ok(())

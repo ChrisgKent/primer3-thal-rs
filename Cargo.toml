@@ -9,3 +9,11 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 pyo3 = "0.27.2"
+
+[dev-dependencies]
+criterion = "0.5"
+pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
+
+[[bench]]
+name = "hairpin"
+harness = false
