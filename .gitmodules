@@ -1,0 +1,3 @@
+[submodule "primer3-py"]
+	path = primer3-py
+	url = https://github.com/libnano/primer3-py.git
