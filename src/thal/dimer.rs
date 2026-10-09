@@ -1,6 +1,6 @@
 //! Dimer alignment (thal.c `thal_any`): fillMatrix, traceback, calcDimer.
 
-use super::{Context, Mode, draw, encode, no_structure, salt_correction};
+use super::{Context, draw, encode, no_structure, salt_correction};
 use crate::thermo::{Init, Thermo};
 use crate::{
     DNA_DIVISOR, DPLX_INIT_H, DPLX_INIT_S, ILAH, ILAS, KELVIN_OFFSET, R, SMALL_NON_ZERO,
@@ -151,19 +151,7 @@ impl Context {
                 }
                 if i > 1 && j > 1 {
                     self.max_tm(i, j);
-                    for d in 3..=max_loop + 2 {
-                        for (ii, jj) in diagonal(i, j, d) {
-                            if !self.dp(ii, jj).is_finite() {
-                                continue;
-                            }
-                            if let Some(c) = self.bulge_internal(ii, jj, i, j, Mode::Fill) {
-                                let c = c.clamp_min_entropy();
-                                if c.is_finite() {
-                                    self.set_dp(i, j, c);
-                                }
-                            }
-                        }
-                    }
+                    self.fill_bulge_internal(i, j, max_loop);
                 }
             }
         }
@@ -195,10 +183,47 @@ impl Context {
         }
     }
 
-    /// Bulge or internal loop closed by inner pair (i, j) and outer pair
-    /// (ii, jj), plus the inner cell (thal.c `calc_bulge_internal`). In
-    /// `Fill` mode only returned if it lowers ΔG of the outer cell.
-    fn bulge_internal(&self, i: usize, j: usize, ii: usize, jj: usize, mode: Mode) -> Option<Thermo> {
+    /// Improve (i, j) with every bulge/internal loop that lowers its ΔG
+    /// (the candidate loop of thal.c `fillMatrix`).
+    fn fill_bulge_internal(&mut self, i: usize, j: usize, max_loop: usize) {
+        let outer = self.outer(i, j);
+        let end = self.end_at(i, j);
+        // ΔG of the cell as thal.c's `calc_bulge_internal` compares it;
+        // only changes when the cell is written.
+        let mut g_cell = (self.dp(i, j) + end).dg37();
+        for d in 3..=max_loop + 2 {
+            for (ii, jj) in diagonal(i, j, d) {
+                if !self.dp(ii, jj).is_finite() {
+                    continue;
+                }
+                let c = self.loop_energy(ii, jj, &outer);
+                if (c + end).dg37() < g_cell {
+                    let c = c.clamp_min_entropy();
+                    if c.is_finite() {
+                        self.set_dp(i, j, c);
+                        g_cell = (c + end).dg37();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Table terms of the outer pair (ii, jj) shared by all its loops.
+    fn outer(&self, ii: usize, jj: usize) -> Outer {
+        let (p, s1, s2) = (self.p, &self.s1, &self.s2);
+        Outer {
+            ii,
+            jj,
+            atp: p.atp(s1[ii], s2[jj]),
+            stack_mm: p.stack_mm(s2[jj], s2[jj - 1], s1[ii], s1[ii - 1]),
+            tstack: p.tstack(s2[jj], s2[jj - 1], s1[ii], s1[ii - 1]),
+        }
+    }
+
+    /// Bulge or internal loop closed by inner pair (i, j) and `outer`, plus
+    /// the inner cell (thal.c `calc_bulge_internal`, before its ΔG test).
+    fn loop_energy(&self, i: usize, j: usize, outer: &Outer) -> Thermo {
+        let Outer { ii, jj, .. } = *outer;
         let (l1, l2) = (ii - i - 1, jj - j - 1);
         let loop_size = l1 + l2 - 1;
         let (p, s1, s2) = (self.p, &self.s1, &self.s2);
@@ -216,31 +241,22 @@ impl Context {
                     c = Thermo::INVALID;
                 }
             } else {
-                c = p.bulge_loop[loop_size] + p.atp(s1[i], s2[j]) + p.atp(s1[ii], s2[jj]) + inner;
+                c = p.bulge_loop[loop_size] + p.atp(s1[i], s2[j]) + outer.atp + inner;
                 c = forbid_unfavourable(c);
             }
         } else if l1 == 1 && l2 == 1 {
-            c = p.stack_mm(s1[i], s1[i + 1], s2[j], s2[j + 1])
-                + p.stack_mm(s2[jj], s2[jj - 1], s1[ii], s1[ii - 1])
-                + inner;
+            c = p.stack_mm(s1[i], s1[i + 1], s2[j], s2[j + 1]) + outer.stack_mm + inner;
             c = forbid_unfavourable(c);
         } else {
             let asym = l1.abs_diff(l2) as f64;
             c = p.interior_loop[loop_size]
                 + p.tstack(s1[i], s1[i + 1], s2[j], s2[j + 1])
-                + p.tstack(s2[jj], s2[jj - 1], s1[ii], s1[ii - 1])
+                + outer.tstack
                 + Thermo::new(ILAS * asym, ILAH * asym)
                 + inner;
             c = forbid_unfavourable(c);
         }
-
-        if mode == Mode::Trace {
-            return Some(c);
-        }
-        let end = self.end_at(ii, jj);
-        let g1 = (c + end).dg37();
-        let g2 = (self.dp(ii, jj) + end).dg37();
-        (g1 < g2).then_some(c)
+        c
     }
 
     /// Cell with the lowest ΔG at 37 °C including its right end.
@@ -283,12 +299,10 @@ impl Context {
             let next = if stacked {
                 Some((i - 1, j - 1))
             } else {
+                let outer = self.outer(i, j);
                 (3..=max_loop + 2)
                     .flat_map(|d| diagonal(i, j, d))
-                    .find(|&(ii, jj)| {
-                        self.bulge_internal(ii, jj, i, j, Mode::Trace)
-                            .is_some_and(|c| cur.approx_eq(c))
-                    })
+                    .find(|&(ii, jj)| cur.approx_eq(self.loop_energy(ii, jj, &outer)))
             };
             // thal.c would spin forever here; a consistent table never gets here.
             let Some((ni, nj)) = next else { break };
@@ -298,6 +312,15 @@ impl Context {
         }
         (ps1, ps2)
     }
+}
+
+/// Outer pair of a bulge/internal loop and its pair-only table terms.
+struct Outer {
+    ii: usize,
+    jj: usize,
+    atp: Thermo,
+    stack_mm: Thermo,
+    tstack: Thermo,
 }
 
 /// thal.c rejects non-finite loops, and loops with both ΔH and ΔS positive.
