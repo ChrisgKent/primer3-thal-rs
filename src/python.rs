@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)] // mirrors primer3-py's keyword arguments
+
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;

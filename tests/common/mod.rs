@@ -122,13 +122,13 @@ pub fn check_all(name: &str, cases: &[Case], f: impl Fn(&Case) -> Result<ThermoR
                     }
                 }
                 // primer3-py reports "" where no structure was found; Rust uses None.
-                if let Some(exp_s) = &exp.ascii_structure {
-                    if got.ascii_structure.as_deref().unwrap_or("") != exp_s {
-                        failures.push(format!(
-                            "{label}: structure expected {exp_s:?} got {:?}",
-                            got.ascii_structure
-                        ));
-                    }
+                if let Some(exp_s) = &exp.ascii_structure
+                    && got.ascii_structure.as_deref().unwrap_or("") != exp_s
+                {
+                    failures.push(format!(
+                        "{label}: structure expected {exp_s:?} got {:?}",
+                        got.ascii_structure
+                    ));
                 }
             }
             (None, Some(err), Err(_)) => {
