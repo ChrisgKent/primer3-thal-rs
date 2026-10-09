@@ -24,8 +24,6 @@ enum Mode {
     Fill,
     /// Re-deriving a filled cell during traceback.
     Trace,
-    /// Hairpin traceback: the loop's own energy, without the enclosed cell.
-    LoopOnly,
 }
 
 /// Uppercased bytes (for drawing) and the padded, encoded sequence.

@@ -18,13 +18,13 @@ pub(super) fn calc(seq: &str, args: &ThalArgs, output_structure: bool) -> Thermo
 
     ctx.init_hairpin_matrix();
     ctx.fill_hairpin_matrix(max_loop);
-    let ends = ctx.terminal_bp(args.temp);
+    let (ends, bases) = ctx.terminal_bp(args.temp);
 
     let best = ends[len];
     if !best.is_finite() {
         return no_structure();
     }
-    let bp = ctx.traceback_hairpin(&ends, max_loop);
+    let bp = ctx.traceback_hairpin(&ends, &bases, max_loop);
 
     // calcHairpin: thal.c counts paired bases among the first len - 1.
     let mut result = ThermoResult {
@@ -89,6 +89,25 @@ fn inner_pairs(i: usize, j: usize, max_loop: usize) -> impl Iterator<Item = (usi
     (min_d..=span.saturating_sub(3))
         .rev()
         .flat_map(move |d| (i + 1..j - d).map(move |ii| (ii, ii + d)))
+}
+
+/// Pair-only table terms of a bulge/internal loop's closing pair.
+struct Closing {
+    atp: Thermo,
+    stack_mm: Thermo,
+    tstack: Thermo,
+}
+
+/// thal.c's test for keeping a bulge/internal candidate with Tm `t1` over a
+/// cell with Tm `t2`. 1x1 loops within SMALL_NON_ZERO are skipped when filling.
+fn accept(mode: Mode, is_1x1: bool, t1: f64, t2: f64) -> bool {
+    if is_1x1 && mode == Mode::Fill && (t1 - t2) < SMALL_NON_ZERO {
+        return false;
+    }
+    match mode {
+        Mode::Fill => t1 > t2,
+        Mode::Trace => t1 >= t2,
+    }
 }
 
 /// Index of the largest of five Tm values, earliest on ties (thal.c `max5`).
@@ -163,17 +182,19 @@ impl Context {
 
     /// Fill (i, j) with its best bulge/internal loop (thal.c `CBI`, traceback 0).
     fn cbi_fill(&mut self, i: usize, j: usize, max_loop: usize) {
+        let closing = self.closing(i, j);
+        // The cell and its Tm only change when the cell is written.
+        let mut cell = self.dp(i, j);
+        let mut t_cell = cell.tm(&self.init);
         for (ii, jj) in inner_pairs(i, j, max_loop) {
-            if ii > self.len1 {
+            if ii > self.len1 || !(self.dp(ii, jj).is_finite() && cell.is_finite()) {
                 continue;
             }
-            if !(self.dp(ii, jj).is_finite() && self.dp(i, j).is_finite()) {
-                continue;
-            }
-            if let Some(c) = self.bulge_internal2(i, j, ii, jj, Mode::Fill)
-                && c.is_finite()
-            {
-                self.set_dp(i, j, c.clamp_min_entropy());
+            let (c, is_1x1) = self.loop_energy2(i, j, ii, jj, &closing, true);
+            if accept(Mode::Fill, is_1x1, c.tm(&self.init), t_cell) && c.is_finite() {
+                cell = c.clamp_min_entropy();
+                self.set_dp(i, j, cell);
+                t_cell = cell.tm(&self.init);
             }
         }
     }
@@ -181,15 +202,16 @@ impl Context {
     /// The loop energy traceback compares against (thal.c `CBI`, traceback 2):
     /// the last candidate that ties or beats the cell.
     fn cbi_trace(&self, i: usize, j: usize, max_loop: usize) -> Thermo {
+        let closing = self.closing(i, j);
+        let cell = self.dp(i, j);
+        let t_cell = cell.tm(&self.init);
         let mut acc = Thermo::INVALID;
         for (ii, jj) in inner_pairs(i, j, max_loop) {
-            if ii > self.len1 {
+            if ii > self.len1 || !(self.dp(ii, jj).is_finite() && cell.is_finite()) {
                 continue;
             }
-            if !(self.dp(ii, jj).is_finite() && self.dp(i, j).is_finite()) {
-                continue;
-            }
-            if let Some(c) = self.bulge_internal2(i, j, ii, jj, Mode::Trace) {
+            let (c, is_1x1) = self.loop_energy2(i, j, ii, jj, &closing, true);
+            if accept(Mode::Trace, is_1x1, c.tm(&self.init), t_cell) {
                 acc = c;
             }
             if acc.is_finite() {
@@ -239,67 +261,74 @@ impl Context {
         c
     }
 
-    /// Bulge or internal loop between outer pair (i, j) and inner pair
-    /// (ii, jj) (thal.c `calc_bulge_internal2`).
-    fn bulge_internal2(&self, i: usize, j: usize, ii: usize, jj: usize, mode: Mode) -> Option<Thermo> {
+    /// Table terms of a loop's closing pair (i, j) that don't depend on
+    /// the inner pair.
+    fn closing(&self, i: usize, j: usize) -> Closing {
+        let (p, s) = (self.p, &self.s1);
+        Closing {
+            atp: p.atp(s[i], s[j]),
+            stack_mm: p.stack_mm(s[i], s[i + 1], s[j], s[j - 1]),
+            tstack: p.tstack(s[i], s[i + 1], s[j], s[j - 1]),
+        }
+    }
+
+    /// Bulge or internal loop between closing pair (i, j) and inner pair
+    /// (ii, jj), plus the inner cell if `with_inner` (thal.c
+    /// `calc_bulge_internal2` before its Tm test). Also reports a 1x1 loop.
+    fn loop_energy2(
+        &self,
+        i: usize,
+        j: usize,
+        ii: usize,
+        jj: usize,
+        closing: &Closing,
+        with_inner: bool,
+    ) -> (Thermo, bool) {
         let (l1, l2) = (ii - i - 1, j - jj - 1);
         let loop_size = l1 + l2 - 1;
         let (p, s) = (self.p, &self.s1);
-        let with_inner = |c: Thermo| {
-            if mode == Mode::LoopOnly {
-                c
-            } else {
-                c + self.dp(ii, jj)
-            }
-        };
-        let forbid_infinite = |c: Thermo| if c.is_finite() { c } else { Thermo::INVALID };
+        let with_inner = |c: Thermo| if with_inner { c + self.dp(ii, jj) } else { c };
 
         let mut is_1x1 = false;
         let c = if (l1 == 0 && l2 > 0) || (l2 == 0 && l1 > 0) {
             if l1 == 1 || l2 == 1 {
                 with_inner(p.bulge_loop[loop_size] + p.stack(s[i], s[ii], s[j], s[jj]))
             } else {
-                with_inner(p.bulge_loop[loop_size] + p.atp(s[i], s[j]) + p.atp(s[ii], s[jj]))
+                with_inner(p.bulge_loop[loop_size] + closing.atp + p.atp(s[ii], s[jj]))
             }
         } else if l1 == 1 && l2 == 1 {
             is_1x1 = true;
-            with_inner(
-                p.stack_mm(s[i], s[i + 1], s[j], s[j - 1])
-                    + p.stack_mm(s[jj], s[jj + 1], s[ii], s[ii - 1]),
-            )
+            with_inner(closing.stack_mm + p.stack_mm(s[jj], s[jj + 1], s[ii], s[ii - 1]))
         } else {
             let asym = l1.abs_diff(l2) as f64;
             with_inner(
                 p.interior_loop[loop_size]
-                    + p.tstack(s[i], s[i + 1], s[j], s[j - 1])
+                    + closing.tstack
                     + p.tstack(s[jj], s[jj + 1], s[ii], s[ii - 1])
                     + Thermo::new(ILAS * asym, ILAH * asym),
             )
         };
-        let c = forbid_infinite(c);
-
-        let t1 = c.tm(&self.init);
-        let t2 = self.dp(i, j).tm(&self.init);
-        // thal.c skips 1x1 loops whose Tm is within SMALL_NON_ZERO of the cell's.
-        if is_1x1 && mode == Mode::Fill && (t1 - t2) < SMALL_NON_ZERO {
-            return None;
-        }
-        let accept = match mode {
-            Mode::Fill => t1 > t2,
-            Mode::Trace => t1 >= t2,
-            Mode::LoopOnly => true,
-        };
-        accept.then_some(c)
+        let c = if c.is_finite() { c } else { Thermo::INVALID };
+        (c, is_1x1)
     }
 
     /// Best 5' end energy at each position (thal.c `calc_terminal_bp`).
-    fn terminal_bp(&self, temp: f64) -> Vec<Thermo> {
+    ///
+    /// Also returns, per position `k`, the value thal.c builds on when
+    /// extending past `k`: `ends[k]`, or zero if that has lower Tm.
+    fn terminal_bp(&self, temp: f64) -> (Vec<Thermo>, Vec<Thermo>) {
         let init = self.init;
+        let zero_tm = Thermo::ZERO.tm(&init);
+        let base = |e: Thermo| if e.tm(&init) >= zero_tm { e } else { Thermo::ZERO };
         let mut ends = vec![Thermo::PAIRABLE; self.len1 + 1];
         ends[0] = Thermo::INVALID;
         ends[1] = Thermo::INVALID;
+        let mut bases = Vec::with_capacity(self.len1 + 1);
+        bases.push(base(ends[0]));
         for i in 2..=self.len1 {
-            let cands = End5::ALL.map(|kind| self.end5(i, kind, &ends));
+            // end5(i, ..) reads bases[..i - 4], all final by now.
+            bases.push(base(ends[i - 1]));
+            let cands = End5::ALL.map(|kind| self.end5(i, kind, &bases));
             let tms = [
                 ends[i - 1].tm(&init),
                 cands[0].tm(&init),
@@ -315,7 +344,8 @@ impl Context {
                 }
             };
         }
-        ends
+        bases.push(base(ends[self.len1]));
+        (ends, bases)
     }
 
     /// Candidate energy for closing at `i` with split `k`, on top of `base`.
@@ -333,18 +363,15 @@ impl Context {
     }
 
     /// Highest-Tm way of closing at `i` with `kind` (thal.c `END5_*`).
-    fn end5(&self, i: usize, kind: End5, ends: &[Thermo]) -> Thermo {
-        let init = self.init;
-        let zero_tm = Thermo::ZERO.tm(&init);
+    fn end5(&self, i: usize, kind: End5, bases: &[Thermo]) -> Thermo {
         let mut best = Thermo::INVALID;
         let mut best_tm = f64::NEG_INFINITY;
         for k in kind.ks(i) {
-            let base = if ends[k].tm(&init) >= zero_tm { ends[k] } else { Thermo::ZERO };
-            let mut c = self.end5_candidate(i, kind, k, base);
+            let mut c = self.end5_candidate(i, kind, k, bases[k]);
             if !c.is_finite() || c.h > 0.0 || c.s > 0.0 {
                 c = Thermo::INVALID;
             }
-            let tm = c.tm(&init);
+            let tm = c.tm(&self.init);
             if best_tm < tm && c.s > crate::MIN_ENTROPY_CUTOFF {
                 best = c;
                 best_tm = tm;
@@ -354,7 +381,7 @@ impl Context {
     }
 
     /// Paired partner (1-based, 0 = unpaired) of each base (thal.c `tracebacku`).
-    fn traceback_hairpin(&self, ends: &[Thermo], max_loop: usize) -> Vec<usize> {
+    fn traceback_hairpin(&self, ends: &[Thermo], bases: &[Thermo], max_loop: usize) -> Vec<usize> {
         enum Frame {
             End5(usize),
             Pair(usize, usize),
@@ -372,7 +399,7 @@ impl Context {
                     }
                     let Some(kind) = End5::ALL
                         .into_iter()
-                        .find(|&kind| ends[i].approx_eq(self.end5(i, kind, ends)))
+                        .find(|&kind| ends[i].approx_eq(self.end5(i, kind, bases)))
                     else {
                         continue;
                     };
@@ -398,9 +425,10 @@ impl Context {
                     } else if cur.approx_eq(self.hairpin_loop(i, j, Mode::Trace)) {
                         // Hairpin loop: nothing enclosed.
                     } else if cur.approx_eq(self.cbi_trace(i, j, max_loop)) {
+                        let closing = self.closing(i, j);
                         let inner = inner_pairs(i, j, max_loop).find(|&(ii, jj)| {
-                            self.bulge_internal2(i, j, ii, jj, Mode::LoopOnly)
-                                .is_some_and(|c| cur.approx_eq(c + self.dp(ii, jj)))
+                            let (c, _) = self.loop_energy2(i, j, ii, jj, &closing, false);
+                            cur.approx_eq(c + self.dp(ii, jj))
                         });
                         if let Some((ii, jj)) = inner {
                             stack.push(Frame::Pair(ii, jj));
