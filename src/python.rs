@@ -85,6 +85,39 @@ fn calc_hairpin_batch_py(
 }
 
 #[pyfunction]
+fn calc_homodimer_py(
+    py: Python<'_>,
+    seq: &str,
+    mv_conc: f64,
+    dv_conc: f64,
+    dntp_conc: f64,
+    dna_conc: f64,
+    temp_c: f64,
+    max_loop: i32,
+    output_structure: bool,
+) -> PyResult<Py<PyDict>> {
+    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    to_dict(py, calc_homodimer(seq, &args, output_structure)?)
+}
+
+#[pyfunction]
+fn calc_homodimer_batch_py(
+    py: Python<'_>,
+    seqs: Vec<String>,
+    mv_conc: f64,
+    dv_conc: f64,
+    dntp_conc: f64,
+    dna_conc: f64,
+    temp_c: f64,
+    max_loop: i32,
+    output_structure: bool,
+) -> PyResult<Vec<Py<PyDict>>> {
+    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    let results = py.detach(|| calc_homodimer_batch(&seqs, &args, output_structure));
+    to_dicts(py, results)
+}
+
+#[pyfunction]
 fn calc_heterodimer_py(
     py: Python<'_>,
     seq1: &str,
@@ -122,6 +155,8 @@ fn calc_heterodimer_batch_py(
 fn primer3_py_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calc_hairpin_py, m)?)?;
     m.add_function(wrap_pyfunction!(calc_hairpin_batch_py, m)?)?;
+    m.add_function(wrap_pyfunction!(calc_homodimer_py, m)?)?;
+    m.add_function(wrap_pyfunction!(calc_homodimer_batch_py, m)?)?;
     m.add_function(wrap_pyfunction!(calc_heterodimer_py, m)?)?;
     m.add_function(wrap_pyfunction!(calc_heterodimer_batch_py, m)?)?;
     m.add("__doc__", "Rust port of primer3 thal (PyO3 bindings)")?;

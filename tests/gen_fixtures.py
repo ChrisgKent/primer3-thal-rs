@@ -168,12 +168,134 @@ def write(name, records):
     print(f"{path.relative_to(ROOT)}: {len(records)} cases")
 
 
+def palindrome(rng, half):
+    """Self-complementary sequence: hits the symmetric-duplex RC branch."""
+    h = rand_seq(rng, half)
+    return h + revcomp(h)
+
+
+def three_prime_partner(rng, primer):
+    """A partner whose 3' end is complementary to the primer's 3' end."""
+    k = rng.randint(3, min(12, len(primer)))
+    overlap = revcomp(primer[-k:])
+    if rng.random() < 0.3:
+        overlap = mutate(rng, overlap, 1)
+    return rand_seq(rng, rng.randint(10, 25)) + overlap
+
+
+def messy(rng, s):
+    out = []
+    for c in s:
+        r = rng.random()
+        out.append(c.lower() if r < 0.3 else rng.choice("NnRYX") if r < 0.35 else c)
+    return "".join(out)
+
+
+def homodimer_cases(rng, scale):
+    n = lambda k: max(1, int(k * scale))
+    seqs = []
+    for _ in range(n(2000)):
+        seqs.append((rand_seq(rng, rng.randint(1, 60), rng.uniform(0.2, 0.8)), rand_args(rng)))
+    for _ in range(n(1500)):
+        s = rand_seq(rng, rng.randint(18, 32), rng.uniform(0.4, 0.6))
+        seqs.append((s, default_args() if rng.random() < 0.3 else rand_args(rng)))
+    for _ in range(n(500)):
+        seqs.append((palindrome(rng, rng.randint(2, 30)), rand_args(rng)))
+    # Primers with a self-complementary 3' end.
+    for _ in range(n(500)):
+        p = rand_seq(rng, rng.randint(12, 25))
+        k = rng.randint(4, 8)
+        seqs.append((p + revcomp(p[-k:]), rand_args(rng)))
+    for _ in range(n(200)):
+        unit = rand_seq(rng, rng.randint(1, 4))
+        seqs.append(((unit * 60)[: rng.randint(4, 60)], rand_args(rng)))
+    for _ in range(n(300)):
+        seqs.append((messy(rng, rand_seq(rng, rng.randint(10, 40))), rand_args(rng)))
+    for _ in range(n(300)):
+        seqs.append((rand_seq(rng, rng.randint(15, 40)), rand_args(rng, True)))
+    for length in [1, 2, 3, 59, 60]:
+        seqs.append((rand_seq(rng, length), rand_args(rng)))
+    errs = [("", default_args()), (rand_seq(rng, 61), default_args())]
+    for ml in [-1, 31]:
+        a = default_args()
+        a["max_loop"] = ml
+        errs.append((rand_seq(rng, 30), a))
+    seqs.extend(errs)
+    return [{"seq": s, "args": a, **run(primer3.calc_homodimer, [s], a)} for s, a in seqs]
+
+
+def heterodimer_cases(rng, scale):
+    n = lambda k: max(1, int(k * scale))
+    pairs = []
+    for _ in range(n(2000)):
+        pairs.append((rand_seq(rng, rng.randint(1, 60)), rand_seq(rng, rng.randint(1, 60)), rand_args(rng)))
+    # Primer pairs, some with designed 3' complementarity.
+    for _ in range(n(1500)):
+        a = rand_seq(rng, rng.randint(18, 32), rng.uniform(0.4, 0.6))
+        b = three_prime_partner(rng, a) if rng.random() < 0.6 else rand_seq(rng, rng.randint(18, 32))
+        if rng.random() < 0.5:
+            a, b = b, a
+        pairs.append((a, b, default_args() if rng.random() < 0.3 else rand_args(rng)))
+    # Full or partial complements, with mismatches and bulges.
+    for _ in range(n(800)):
+        a = rand_seq(rng, rng.randint(8, 60))
+        b = revcomp(a)
+        r = rng.random()
+        if r < 0.4:
+            b = mutate(rng, b, rng.randint(1, 4))
+        elif r < 0.6:
+            k = rng.randrange(len(b) + 1)
+            b = (b[:k] + rand_seq(rng, rng.randint(1, 3)) + b[k:])[:60]
+        elif r < 0.8:
+            i = rng.randrange(len(b))
+            b = b[i : i + rng.randint(4, 30)] or b
+        pairs.append((a, b, rand_args(rng)))
+    # Both palindromic (symmetric RC) and only one palindromic.
+    for _ in range(n(400)):
+        a = palindrome(rng, rng.randint(2, 30))
+        b = palindrome(rng, rng.randint(2, 30)) if rng.random() < 0.5 else rand_seq(rng, rng.randint(4, 60))
+        pairs.append((a, b, rand_args(rng)))
+    # One sequence longer than 60: allowed by thal as long as the other is not.
+    for _ in range(n(200)):
+        short = rand_seq(rng, rng.randint(15, 60))
+        long_ = rand_seq(rng, rng.randint(61, 200))
+        if rng.random() < 0.5:
+            # embed the short one's complement so a duplex exists
+            k = rng.randrange(len(long_))
+            long_ = long_[:k] + revcomp(short) + long_[k:]
+        a, b = (short, long_) if rng.random() < 0.5 else (long_, short)
+        pairs.append((a, b, rand_args(rng)))
+    for _ in range(n(300)):
+        a = rand_seq(rng, rng.randint(10, 40))
+        pairs.append((messy(rng, a), messy(rng, revcomp(a)), rand_args(rng)))
+    for _ in range(n(300)):
+        a = rand_seq(rng, rng.randint(15, 40))
+        pairs.append((a, three_prime_partner(rng, a), rand_args(rng, True)))
+    errs = [
+        ("", "ACGT", default_args()),
+        ("ACGT", "", default_args()),
+        (rand_seq(rng, 61), rand_seq(rng, 61), default_args()),
+        (rand_seq(rng, 10001), rand_seq(rng, 20), default_args()),
+    ]
+    for ml in [-1, 31]:
+        a = default_args()
+        a["max_loop"] = ml
+        errs.append((rand_seq(rng, 30), rand_seq(rng, 30), a))
+    pairs.extend(errs)
+    return [
+        {"seq": a, "seq2": b, "args": args, **run(primer3.calc_heterodimer, [a, b], args)}
+        for a, b, args in pairs
+    ]
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--scale", type=float, default=1.0)
     a = p.parse_args()
     write("hairpin", hairpin_cases(random.Random(a.seed), a.scale))
+    write("homodimer", homodimer_cases(random.Random(a.seed + 1), a.scale))
+    write("heterodimer", heterodimer_cases(random.Random(a.seed + 2), a.scale))
 
 
 if __name__ == "__main__":

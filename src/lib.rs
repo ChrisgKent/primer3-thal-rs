@@ -7,9 +7,9 @@ mod params;
 mod python;
 mod thal;
 
-pub use thal::{calc_hairpin, calc_heterodimer};
+pub use thal::{calc_hairpin, calc_heterodimer, calc_homodimer};
 #[cfg(feature = "parallel")]
-pub use thal::{calc_hairpin_batch, calc_heterodimer_batch};
+pub use thal::{calc_hairpin_batch, calc_heterodimer_batch, calc_homodimer_batch};
 
 const MIN_HRPN_LOOP: i32 = 3;
 const MAX_LOOP: i32 = 30;

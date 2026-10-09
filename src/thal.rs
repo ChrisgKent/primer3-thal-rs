@@ -329,6 +329,7 @@ fn find_best_any(ctx: &Context<'_>) -> Option<(i32, i32)> {
     }
 }
 
+/// Heterodimer, equivalent to primer3's `thal_any` mode.
 pub fn calc_heterodimer(
     seq1: &str,
     seq2: &str,
@@ -397,6 +398,26 @@ pub fn calc_heterodimer(
         result.ascii_structure = Some(ascii);
     }
     Ok(result)
+}
+
+/// Homodimer: primer3-py runs `thal(seq, seq, thal_any)`.
+pub fn calc_homodimer(
+    seq: &str,
+    args: &ThalArgs,
+    output_structure: bool,
+) -> Result<ThermoResult, ThalError> {
+    calc_heterodimer(seq, seq, args, output_structure)
+}
+
+#[cfg(feature = "parallel")]
+pub fn calc_homodimer_batch<T: AsRef<str> + Sync>(
+    seqs: &[T],
+    args: &ThalArgs,
+    output_structure: bool,
+) -> Vec<Result<ThermoResult, ThalError>> {
+    seqs.par_iter()
+        .map(|s| calc_homodimer(s.as_ref(), args, output_structure))
+        .collect()
 }
 
 #[cfg(feature = "parallel")]

@@ -62,6 +62,44 @@ def calc_hairpin_batch_py(
     ...
 
 
+def calc_homodimer_py(
+    seq: str,
+    mv_conc: float,
+    dv_conc: float,
+    dntp_conc: float,
+    dna_conc: float,
+    temp_c: float,
+    max_loop: int,
+    output_structure: bool,
+) -> ThermoResult:
+    """
+    Compute homodimer thermodynamics for one DNA sequence (thal_any alignment
+    of the sequence against itself, as primer3-py's calc_homodimer).
+
+    Parameters match calc_hairpin_py.
+
+    Raises RuntimeError for empty or >60 bp sequences, ValueError for
+    max_loop outside 0..=30.
+    """
+    ...
+
+
+def calc_homodimer_batch_py(
+    seqs: List[str],
+    mv_conc: float,
+    dv_conc: float,
+    dntp_conc: float,
+    dna_conc: float,
+    temp_c: float,
+    max_loop: int,
+    output_structure: bool,
+) -> List[ThermoResult]:
+    """
+    Compute homodimer thermodynamics for many sequences in parallel.
+    """
+    ...
+
+
 def calc_heterodimer_py(
     seq1: str,
     seq2: str,

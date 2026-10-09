@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
-use primer3_py_rs::{ThalArgs, calc_heterodimer};
+use primer3_py_rs::{ThalArgs, calc_heterodimer, calc_homodimer};
 
 fn bench_calc_heterodimer(c: &mut Criterion) {
     let args = ThalArgs::default();
@@ -36,12 +36,30 @@ fn bench_calc_heterodimer(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_calc_homodimer(c: &mut Criterion) {
+    let args = ThalArgs::default();
+    let seqs = [
+        "CCCCCATCCGATCAGGGGG",
+        "TGCATTGAATGCGTGTCACGTTATGCACGC",
+        "GTGTCCAATCGACATTTAGGAGCTACGCGGCCAGGGGCAAA",
+        "TTGAAGGAGTCTAGCAGCCGCAGTAAGGCACAATACCTCGTCCGATCGTACGTAGCTAGC",
+    ];
+
+    let mut group = c.benchmark_group("calc_homodimer");
+    for seq in seqs {
+        group.bench_with_input(BenchmarkId::from_parameter(seq.len()), seq, |b, s| {
+            b.iter(|| black_box(calc_homodimer(black_box(s), black_box(&args), false)))
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(
         100,
         Output::Flamegraph(None),
     ));
-    targets = bench_calc_heterodimer
+    targets = bench_calc_heterodimer, bench_calc_homodimer
 );
 criterion_main!(benches);
