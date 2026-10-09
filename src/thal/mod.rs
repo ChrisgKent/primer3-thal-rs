@@ -60,6 +60,8 @@ struct Context {
     entropy: Vec<f64>,
     enthalpy: Vec<f64>,
     init: Init,
+    /// Dimers only: `right_end(i, j)` for every cell, row stride `len2`.
+    right_ends: Vec<Thermo>,
 }
 
 impl Context {
@@ -78,6 +80,7 @@ impl Context {
             entropy: vec![0.0; len1 * len2],
             enthalpy: vec![0.0; len1 * len2],
             init,
+            right_ends: Vec::new(),
         }
     }
 

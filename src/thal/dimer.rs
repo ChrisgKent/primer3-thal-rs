@@ -27,6 +27,7 @@ pub(super) fn calc(seq1: &str, seq2: &str, args: &ThalArgs, output_structure: bo
     let mut ctx = Context::new(s1, s2, stride, init);
     let max_loop = args.max_loop as usize;
 
+    ctx.cache_right_ends();
     ctx.init_dimer_matrix();
     ctx.fill_dimer_matrix(max_loop);
 
@@ -35,7 +36,7 @@ pub(super) fn calc(seq1: &str, seq2: &str, args: &ThalArgs, output_structure: bo
     if !best.is_finite() {
         return no_structure();
     }
-    let end = ctx.right_end(bi, bj);
+    let end = ctx.end_at(bi, bj);
     let dh = best.h + end.h + init.h;
     let ds = best.s + end.s + init.s;
 
@@ -108,6 +109,23 @@ fn diagonal(i: usize, j: usize, d: usize) -> impl Iterator<Item = (usize, usize)
 }
 
 impl Context {
+    /// `right_end` depends only on the sequences, but the fill needs it for
+    /// every bulge/internal candidate; compute it once per cell.
+    fn cache_right_ends(&mut self) {
+        let mut ends = Vec::with_capacity(self.len1 * self.len2);
+        for i in 1..=self.len1 {
+            for j in 1..=self.len2 {
+                ends.push(self.right_end(i, j));
+            }
+        }
+        self.right_ends = ends;
+    }
+
+    #[inline]
+    fn end_at(&self, i: usize, j: usize) -> Thermo {
+        self.right_ends[(i - 1) * self.len2 + j - 1]
+    }
+
     fn init_dimer_matrix(&mut self) {
         for i in 1..=self.len1 {
             for j in 1..=self.len2 {
@@ -156,7 +174,7 @@ impl Context {
     fn max_tm(&mut self, i: usize, j: usize) {
         let init = self.init;
         let mut c0 = self.dp(i, j);
-        let end = self.right_end(i, j);
+        let end = self.end_at(i, j);
         let t0 = (c0.h + init.h + end.h) / (c0.s + init.s + end.s + init.rc);
 
         let prev = self.dp(i - 1, j - 1);
@@ -219,7 +237,7 @@ impl Context {
         if mode == Mode::Trace {
             return Some(c);
         }
-        let end = self.right_end(ii, jj);
+        let end = self.end_at(ii, jj);
         let g1 = (c + end).dg37();
         let g2 = (self.dp(ii, jj) + end).dg37();
         (g1 < g2).then_some(c)
@@ -233,7 +251,7 @@ impl Context {
         for i in 1..=self.len1 {
             for j in 1..=self.len2 {
                 let c = self.dp(i, j);
-                let end = self.right_end(i, j);
+                let end = self.end_at(i, j);
                 let (end_s, end_h) = (end.s + SMALL_NON_ZERO, end.h + SMALL_NON_ZERO);
                 let g = (c.h + end_h + init.h) - TEMP_KELVIN * (c.s + end_s + init.s);
                 if g < best_g {
