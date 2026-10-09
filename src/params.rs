@@ -371,7 +371,7 @@ pub(crate) fn get_tetraloop(
 pub(crate) fn table_start_at_s(atp: &mut [[f64; 5]; 5], value: f64) {
     for i in 0..5 {
         for j in 0..5 {
-            atp[i][j] = 0.0;
+            atp[i][j] = 0.00000000001;
         }
     }
     atp[0][3] = value;

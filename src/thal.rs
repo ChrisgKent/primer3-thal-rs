@@ -125,20 +125,25 @@ impl<'a> Context<'a> {
     }
 }
 
-pub fn calc_hairpin(seq: &str, args: &ThalArgs, output_structure: bool) -> ThermoResult {
-    let mut result = ThermoResult::default();
-
+/// Hairpin (monomer secondary structure), equivalent to primer3's `thal_hairpin` mode.
+pub fn calc_hairpin(
+    seq: &str,
+    args: &ThalArgs,
+    output_structure: bool,
+) -> Result<ThermoResult, ThalError> {
+    args.validate()?;
     if seq.is_empty() {
-        return result;
+        return Err(ThalError::EmptySequence);
+    }
+    if seq.len() > THAL_MAX_ALIGN as usize {
+        return Err(ThalError::TooLong {
+            len: seq.len(),
+            max: THAL_MAX_ALIGN as usize,
+        });
     }
 
+    let mut result = ThermoResult::default();
     let len1 = seq.len() as i32;
-    if len1 > THAL_MAX_SEQ {
-        return result;
-    }
-    if len1 > THAL_MAX_ALIGN {
-        return result;
-    }
 
     let params = params();
 
@@ -195,9 +200,7 @@ pub fn calc_hairpin(seq: &str, args: &ThalArgs, output_structure: bool) -> Therm
     let ms = send5[len1 as usize];
 
     if !mh.is_finite() {
-        result.structure_found = false;
-        result.tm = 0.0;
-        return result;
+        return Ok(result);
     }
 
     let mut bp = vec![0i32; len1 as usize];
@@ -215,7 +218,7 @@ pub fn calc_hairpin(seq: &str, args: &ThalArgs, output_structure: bool) -> Therm
     result.ds = ds;
     result.dh = dh;
     result.dg = dg;
-    result
+    Ok(result)
 }
 
 #[cfg(feature = "parallel")]
@@ -223,7 +226,7 @@ pub fn calc_hairpin_batch<T: AsRef<str> + Sync>(
     seqs: &[T],
     args: &ThalArgs,
     output_structure: bool,
-) -> Vec<ThermoResult> {
+) -> Vec<Result<ThermoResult, ThalError>> {
     seqs.par_iter()
         .map(|s| calc_hairpin(s.as_ref(), args, output_structure))
         .collect()
@@ -239,18 +242,27 @@ struct PreparedDimer {
     len3: i32,
 }
 
-fn prepare_dimer_sequences(seq1: &str, seq2: &str) -> Option<PreparedDimer> {
+fn prepare_dimer_sequences(seq1: &str, seq2: &str) -> Result<PreparedDimer, ThalError> {
     if seq1.is_empty() || seq2.is_empty() {
-        return None;
+        return Err(ThalError::EmptySequence);
+    }
+    // As in thal.c: one sequence may be longer than THAL_MAX_ALIGN, not both.
+    if seq1.len() > THAL_MAX_ALIGN as usize && seq2.len() > THAL_MAX_ALIGN as usize {
+        return Err(ThalError::TooLong {
+            len: seq1.len().min(seq2.len()),
+            max: THAL_MAX_ALIGN as usize,
+        });
+    }
+    for len in [seq1.len(), seq2.len()] {
+        if len > THAL_MAX_SEQ as usize {
+            return Err(ThalError::TooLong {
+                len,
+                max: THAL_MAX_SEQ as usize,
+            });
+        }
     }
     let len1 = seq1.len() as i32;
     let len2 = seq2.len() as i32;
-    if len1 > THAL_MAX_SEQ || len2 > THAL_MAX_SEQ {
-        return None;
-    }
-    if len1 > THAL_MAX_ALIGN || len2 > THAL_MAX_ALIGN {
-        return None;
-    }
 
     let oligo1: Vec<u8> = seq1
         .as_bytes()
@@ -274,7 +286,7 @@ fn prepare_dimer_sequences(seq1: &str, seq2: &str) -> Option<PreparedDimer> {
         num_seq2[i + 1] = str2int(*base);
     }
 
-    Some(PreparedDimer {
+    Ok(PreparedDimer {
         oligo1,
         oligo2,
         num_seq1,
@@ -322,12 +334,10 @@ pub fn calc_heterodimer(
     seq2: &str,
     args: &ThalArgs,
     output_structure: bool,
-) -> DimerResult {
-    let mut result = DimerResult::default();
-    let prepared = match prepare_dimer_sequences(seq1, seq2) {
-        Some(prepared) => prepared,
-        None => return result,
-    };
+) -> Result<ThermoResult, ThalError> {
+    args.validate()?;
+    let prepared = prepare_dimer_sequences(seq1, seq2)?;
+    let mut result = ThermoResult::default();
 
     let params = params();
     let salt_correction = salt_correct_s(args.mv, args.dv, args.dntp);
@@ -367,7 +377,7 @@ pub fn calc_heterodimer(
     let ds = ctx.entropy(best_i, best_j) + sh[0] + ctx.dplx_init_s;
 
     if !ctx.enthalpy(best_i, best_j).is_finite() {
-        return result;
+        return Ok(result);
     }
 
     let mut ps1 = vec![0i32; prepared.len1 as usize];
@@ -386,7 +396,7 @@ pub fn calc_heterodimer(
         let ascii = draw_dimer(&ps1, &ps2, &prepared.oligo1, &prepared.oligo2);
         result.ascii_structure = Some(ascii);
     }
-    result
+    Ok(result)
 }
 
 #[cfg(feature = "parallel")]
@@ -394,7 +404,7 @@ pub fn calc_heterodimer_batch(
     pairs: &[(String, String)],
     args: &ThalArgs,
     output_structure: bool,
-) -> Vec<DimerResult> {
+) -> Vec<Result<ThermoResult, ThalError>> {
     pairs
         .par_iter()
         .map(|(a, b)| calc_heterodimer(a, b, args, output_structure))
@@ -482,7 +492,7 @@ fn max_tm(i: i32, j: i32, ctx: &mut Context<'_>) {
     if t1 > t0 {
         ctx.set_entropy(i, j, s1);
         ctx.set_enthalpy(i, j, h1);
-    } else {
+    } else if t0 >= t1 {
         ctx.set_entropy(i, j, s0);
         ctx.set_enthalpy(i, j, h0);
     }

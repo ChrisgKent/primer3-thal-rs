@@ -4,7 +4,7 @@ use pprof::criterion::{Output, PProfProfiler};
 use primer3_py_rs::{ThalArgs, calc_heterodimer};
 
 fn bench_calc_heterodimer(c: &mut Criterion) {
-    let args = ThalArgs::hairpin_defaults();
+    let args = ThalArgs::default();
     let pairs = [
         ("CCCCCATCCGATCAGGGGG", "CCCCCATCCGATCAGGGGG"),
         (

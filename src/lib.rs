@@ -37,6 +37,8 @@ const BPI: [[i32; 5]; 5] = [
     [0, 0, 0, 0, 0],
 ];
 
+/// Conditions for a thermodynamic alignment. Concentrations are in mM
+/// (`mv`, `dv`, `dntp`) and nM (`dna_conc`); `temp` is in Kelvin.
 #[derive(Clone, Copy, Debug)]
 pub struct ThalArgs {
     pub max_loop: i32,
@@ -47,20 +49,59 @@ pub struct ThalArgs {
     pub temp: f64, // Kelvin
 }
 
-impl ThalArgs {
-    pub fn hairpin_defaults() -> Self {
+/// primer3-py defaults (`primer3.argdefaults.Primer3PyArguments`).
+impl Default for ThalArgs {
+    fn default() -> Self {
         Self {
             max_loop: MAX_LOOP,
             mv: 50.0,
-            dv: 0.0,
-            dntp: 0.8,
+            dv: 1.5,
+            dntp: 0.6,
             dna_conc: 50.0,
             temp: TEMP_KELVIN,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+impl ThalArgs {
+    pub fn with_temp_c(mut self, temp_c: f64) -> Self {
+        self.temp = temp_c + ABSOLUTE_ZERO;
+        self
+    }
+
+    fn validate(&self) -> Result<(), ThalError> {
+        if !(0..=MAX_LOOP).contains(&self.max_loop) {
+            return Err(ThalError::InvalidMaxLoop(self.max_loop));
+        }
+        Ok(())
+    }
+}
+
+/// Inputs primer3 rejects. Mirrors the errors raised by primer3-py.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ThalError {
+    EmptySequence,
+    TooLong { len: usize, max: usize },
+    InvalidMaxLoop(i32),
+}
+
+impl std::fmt::Display for ThalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ThalError::EmptySequence => write!(f, "empty sequence"),
+            ThalError::TooLong { len, max } => {
+                write!(f, "sequence length {len} exceeds maximum of {max}bp")
+            }
+            ThalError::InvalidMaxLoop(v) => {
+                write!(f, "max_loop must be between 0 and {MAX_LOOP}, received {v}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ThalError {}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ThermoResult {
     pub structure_found: bool,
     pub tm: f64,
@@ -68,42 +109,6 @@ pub struct ThermoResult {
     pub dh: f64,
     pub ds: f64,
     pub ascii_structure: Option<String>,
-}
-
-impl Default for ThermoResult {
-    fn default() -> Self {
-        Self {
-            structure_found: false,
-            tm: 0.0,
-            dg: 0.0,
-            dh: 0.0,
-            ds: 0.0,
-            ascii_structure: None,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct DimerResult {
-    pub structure_found: bool,
-    pub tm: f64,
-    pub dg: f64,
-    pub dh: f64,
-    pub ds: f64,
-    pub ascii_structure: Option<String>,
-}
-
-impl Default for DimerResult {
-    fn default() -> Self {
-        Self {
-            structure_found: false,
-            tm: 0.0,
-            dg: 0.0,
-            dh: 0.0,
-            ds: 0.0,
-            ascii_structure: None,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -203,13 +208,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hairpin_matches_readme_example() {
-        let args = ThalArgs::hairpin_defaults();
-        let res = calc_hairpin("CCCCCATCCGATCAGGGGG", &args, false);
+    fn hairpin_matches_primer3_py_defaults() {
+        let res = calc_hairpin("CCCCCATCCGATCAGGGGG", &ThalArgs::default(), false).unwrap();
         assert!(res.structure_found);
-        assert!((res.tm - 62.63).abs() < 0.05);
-        assert!((res.dg - (-2770.52)).abs() < 0.5);
-        assert!((res.dh - (-36300.00)).abs() < 1.0);
-        assert!((res.ds - (-108.11)).abs() < 0.1);
+        assert!((res.tm - 66.74727264598937).abs() < 1e-9);
+        assert!((res.dg - (-3176.918686764744)).abs() < 1e-6);
+        assert_eq!(res.dh, -36300.0);
     }
 }

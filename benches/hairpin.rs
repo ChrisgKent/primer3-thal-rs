@@ -4,7 +4,7 @@ use pprof::criterion::{Output, PProfProfiler};
 use primer3_py_rs::{calc_hairpin, ThalArgs};
 
 fn bench_calc_hairpin(c: &mut Criterion) {
-    let args = ThalArgs::hairpin_defaults();
+    let args = ThalArgs::default();
     let seqs = [
         "CCCCCATCCGATCAGGGGG",
         "GTGTCCAATCGACATTTAGGAGCTACGCGGCCAGGGGCAAA",

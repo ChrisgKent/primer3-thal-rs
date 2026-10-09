@@ -65,7 +65,7 @@ fn heterodimer_torture_data_matches_primer3() {
             temp: rec.args.temp_c + 273.15,
         };
 
-        let res = calc_heterodimer(&rec.seq1, &rec.seq2, &args, rec.args.output_structure);
+        let res = calc_heterodimer(&rec.seq1, &rec.seq2, &args, rec.args.output_structure).unwrap();
 
         assert_eq!(
             res.structure_found, rec.result.structure_found,
