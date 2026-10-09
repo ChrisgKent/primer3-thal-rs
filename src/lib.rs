@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use rayon::prelude::*;
 
 const MIN_HRPN_LOOP: i32 = 3;
 const MAX_LOOP: i32 = 30;
@@ -855,6 +856,16 @@ pub fn calc_hairpin(seq: &str, args: &ThalArgs, output_structure: bool) -> Therm
     result
 }
 
+pub fn calc_hairpin_batch<T: AsRef<str> + Sync>(
+    seqs: &[T],
+    args: &ThalArgs,
+    output_structure: bool,
+) -> Vec<ThermoResult> {
+    seqs.par_iter()
+        .map(|s| calc_hairpin(s.as_ref(), args, output_structure))
+        .collect()
+}
+
 struct PreparedDimer {
     oligo1: Vec<u8>,
     oligo2: Vec<u8>,
@@ -1009,9 +1020,21 @@ pub fn calc_heterodimer(
     result.dh = dh_adj;
     result.dg = dg;
     if output_structure {
-        // TODO: Port drawDimer for ASCII structure output
+        let ascii = draw_dimer(&ps1, &ps2, &prepared.oligo1, &prepared.oligo2);
+        result.ascii_structure = Some(ascii);
     }
     result
+}
+
+pub fn calc_heterodimer_batch(
+    pairs: &[(String, String)],
+    args: &ThalArgs,
+    output_structure: bool,
+) -> Vec<DimerResult> {
+    pairs
+        .par_iter()
+        .map(|(a, b)| calc_heterodimer(a, b, args, output_structure))
+        .collect()
 }
 
 fn init_matrix2(ctx: &mut Context<'_>) {
@@ -2414,6 +2437,110 @@ fn calc_dimer_values(
     (t, s_adj, h, g)
 }
 
+fn trim_trailing_whitespace(buf: &mut Vec<u8>) {
+    while matches!(buf.last(), Some(b) if b.is_ascii_whitespace()) {
+        buf.pop();
+    }
+}
+
+fn draw_dimer(ps1: &[i32], ps2: &[i32], oligo1: &[u8], oligo2: &[u8]) -> String {
+    let len1 = oligo1.len();
+    let len2 = oligo2.len();
+    let cap = len1 + len2 + 1;
+
+    let mut duplex_0: Vec<u8> = Vec::with_capacity(cap);
+    let mut duplex_1: Vec<u8> = Vec::with_capacity(cap);
+    let mut duplex_2: Vec<u8> = Vec::with_capacity(cap);
+    let mut duplex_3: Vec<u8> = Vec::with_capacity(cap);
+
+    let num_ss1 = ps1.iter().take_while(|v| **v == 0).count();
+    let num_ss2 = ps2.iter().take_while(|v| **v == 0).count();
+
+    if num_ss1 >= num_ss2 {
+        for i in 0..num_ss1 {
+            duplex_0.push(oligo1[i]);
+            duplex_1.push(b' ');
+            duplex_2.push(b' ');
+        }
+        for _ in 0..(num_ss1 - num_ss2) {
+            duplex_3.push(b' ');
+        }
+        for j in 0..num_ss2 {
+            duplex_3.push(oligo2[j]);
+        }
+    } else {
+        for j in 0..num_ss2 {
+            duplex_3.push(oligo2[j]);
+            duplex_1.push(b' ');
+            duplex_2.push(b' ');
+        }
+        for _ in 0..(num_ss2 - num_ss1) {
+            duplex_0.push(b' ');
+        }
+        for i in 0..num_ss1 {
+            duplex_0.push(oligo1[i]);
+        }
+    }
+
+    let mut i = num_ss1 + 1; // 1-based
+    let mut j = num_ss2 + 1; // 1-based
+
+    while i <= len1 {
+        while i <= len1
+            && j <= len2
+            && ps1[i - 1] != 0
+            && ps2[j - 1] != 0
+        {
+            duplex_0.push(b' ');
+            duplex_1.push(oligo1[i - 1]);
+            duplex_2.push(oligo2[j - 1]);
+            duplex_3.push(b' ');
+            i += 1;
+            j += 1;
+        }
+
+        let mut gap1 = 0usize;
+        while i <= len1 && ps1[i - 1] == 0 {
+            duplex_0.push(oligo1[i - 1]);
+            duplex_1.push(b' ');
+            gap1 += 1;
+            i += 1;
+        }
+
+        let mut gap2 = 0usize;
+        while j <= len2 && ps2[j - 1] == 0 {
+            duplex_2.push(b' ');
+            duplex_3.push(oligo2[j - 1]);
+            gap2 += 1;
+            j += 1;
+        }
+
+        if gap1 < gap2 {
+            for _ in 0..(gap2 - gap1) {
+                duplex_0.push(b'-');
+                duplex_1.push(b' ');
+            }
+        } else if gap1 > gap2 {
+            for _ in 0..(gap1 - gap2) {
+                duplex_2.push(b' ');
+                duplex_3.push(b'-');
+            }
+        }
+    }
+
+    trim_trailing_whitespace(&mut duplex_0);
+    trim_trailing_whitespace(&mut duplex_1);
+    trim_trailing_whitespace(&mut duplex_2);
+    trim_trailing_whitespace(&mut duplex_3);
+
+    let s0 = String::from_utf8(duplex_0).unwrap_or_default();
+    let s1 = String::from_utf8(duplex_1).unwrap_or_default();
+    let s2 = String::from_utf8(duplex_2).unwrap_or_default();
+    let s3 = String::from_utf8(duplex_3).unwrap_or_default();
+
+    format!("SEQ\t{s0}\nSEQ\t{s1}\nSTR\t{s2}\nSTR\t{s3}\n")
+}
+
 fn draw_hairpin(
     bp: &[i32],
     mh: f64,
@@ -2795,6 +2922,47 @@ fn calc_hairpin_py(
 }
 
 #[pyfunction]
+fn calc_hairpin_batch_py(
+    py: Python<'_>,
+    seqs: Vec<String>,
+    mv_conc: f64,
+    dv_conc: f64,
+    dntp_conc: f64,
+    dna_conc: f64,
+    temp_c: f64,
+    max_loop: i32,
+    output_structure: bool,
+) -> PyResult<Vec<Py<PyDict>>> {
+    let args = ThalArgs {
+        max_loop,
+        mv: mv_conc,
+        dv: dv_conc,
+        dntp: dntp_conc,
+        dna_conc,
+        temp: temp_c + 273.15,
+    };
+    let results = seqs
+        .par_iter()
+        .map(|seq| calc_hairpin(seq, &args, output_structure))
+        .collect::<Vec<_>>();
+    let mut out = Vec::with_capacity(results.len());
+    for res in results {
+        let dict = PyDict::new(py);
+        dict.set_item("structure_found", res.structure_found)?;
+        dict.set_item("tm", res.tm)?;
+        dict.set_item("ds", res.ds)?;
+        dict.set_item("dh", res.dh)?;
+        dict.set_item("dg", res.dg)?;
+        match res.ascii_structure {
+            Some(s) => dict.set_item("ascii_structure", s)?,
+            None => dict.set_item("ascii_structure", py.None())?,
+        };
+        out.push(dict.unbind());
+    }
+    Ok(out)
+}
+
+#[pyfunction]
 fn calc_heterodimer_py(
     py: Python<'_>,
     seq1: &str,
@@ -2829,10 +2997,53 @@ fn calc_heterodimer_py(
     Ok(out.unbind())
 }
 
+#[pyfunction]
+fn calc_heterodimer_batch_py(
+    py: Python<'_>,
+    pairs: Vec<(String, String)>,
+    mv_conc: f64,
+    dv_conc: f64,
+    dntp_conc: f64,
+    dna_conc: f64,
+    temp_c: f64,
+    max_loop: i32,
+    output_structure: bool,
+) -> PyResult<Vec<Py<PyDict>>> {
+    let args = ThalArgs {
+        max_loop,
+        mv: mv_conc,
+        dv: dv_conc,
+        dntp: dntp_conc,
+        dna_conc,
+        temp: temp_c + 273.15,
+    };
+    let results = pairs
+        .par_iter()
+        .map(|(a, b)| calc_heterodimer(a, b, &args, output_structure))
+        .collect::<Vec<_>>();
+    let mut out = Vec::with_capacity(results.len());
+    for res in results {
+        let dict = PyDict::new(py);
+        dict.set_item("structure_found", res.structure_found)?;
+        dict.set_item("tm", res.tm)?;
+        dict.set_item("ds", res.ds)?;
+        dict.set_item("dh", res.dh)?;
+        dict.set_item("dg", res.dg)?;
+        match res.ascii_structure {
+            Some(s) => dict.set_item("ascii_structure", s)?,
+            None => dict.set_item("ascii_structure", py.None())?,
+        };
+        out.push(dict.unbind());
+    }
+    Ok(out)
+}
+
 #[pymodule]
 fn primer3_py_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calc_hairpin_py, m)?)?;
+    m.add_function(wrap_pyfunction!(calc_hairpin_batch_py, m)?)?;
     m.add_function(wrap_pyfunction!(calc_heterodimer_py, m)?)?;
+    m.add_function(wrap_pyfunction!(calc_heterodimer_batch_py, m)?)?;
     m.add("__doc__", "Rust hairpin thermodynamics (PyO3 bindings)")?;
     m.add("version", env!("CARGO_PKG_VERSION"))?;
     Ok(())
