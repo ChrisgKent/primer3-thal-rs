@@ -28,6 +28,7 @@ pub(super) fn calc(seq1: &str, seq2: &str, args: &ThalArgs, output_structure: bo
     let max_loop = args.max_loop as usize;
 
     ctx.cache_right_ends();
+    ctx.cache_pairable();
     ctx.init_dimer_matrix();
     ctx.fill_dimer_matrix(max_loop);
 
@@ -121,6 +122,34 @@ impl Context {
         self.right_ends = ends;
     }
 
+    /// Index the cells that can pair, by anti-diagonal. In the dimer DP a
+    /// cell is finite exactly when its bases pair: `init_dimer_matrix` makes
+    /// the rest `INVALID` and the fill never writes them. So the fill can
+    /// skip them without changing any result.
+    fn cache_pairable(&mut self) {
+        let mut ii_out = Vec::new();
+        let mut off = Vec::with_capacity(self.len1 + self.len2 + 2);
+        for sum in 0..=self.len1 + self.len2 {
+            off.push(ii_out.len() as u32);
+            let lo = 1.max(sum.saturating_sub(self.len2));
+            let hi = self.len1.min(sum.saturating_sub(1));
+            for ii in lo..=hi {
+                if self.s1[ii].pairs_with(self.s2[sum - ii]) {
+                    ii_out.push(ii as u32);
+                }
+            }
+        }
+        off.push(ii_out.len() as u32);
+        self.pairable_ii = ii_out;
+        self.pairable_off = off;
+    }
+
+    /// Pairable `ii` on anti-diagonal `sum`, ascending.
+    #[inline]
+    fn pairable_on(&self, sum: usize) -> &[u32] {
+        &self.pairable_ii[self.pairable_off[sum] as usize..self.pairable_off[sum + 1] as usize]
+    }
+
     #[inline]
     fn end_at(&self, i: usize, j: usize) -> Thermo {
         self.right_ends[(i - 1) * self.len2 + j - 1]
@@ -192,7 +221,23 @@ impl Context {
         // only changes when the cell is written.
         let mut g_cell = (self.dp(i, j) + end).dg37();
         for d in 3..=max_loop + 2 {
-            for (ii, jj) in diagonal(i, j, d) {
+            // The cells of diagonal(i, j, d) that can pair, in the same
+            // order (ii descending).
+            let Some(sum) = (i + j).checked_sub(d).filter(|&s| s >= 2) else {
+                break;
+            };
+            let lo = 1.max((sum + 1).saturating_sub(j));
+            let hi = (i - 1).min(sum - 1);
+            if lo > hi {
+                continue;
+            }
+            let diag = self.pairable_on(sum);
+            let start = diag.partition_point(|&ii| (ii as usize) < lo);
+            let stop = diag.partition_point(|&ii| ii as usize <= hi);
+            let base = self.pairable_off[sum] as usize;
+            for k in (start..stop).rev() {
+                let ii = self.pairable_ii[base + k] as usize;
+                let jj = sum - ii;
                 if !self.dp(ii, jj).is_finite() {
                     continue;
                 }

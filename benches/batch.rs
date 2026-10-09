@@ -1,5 +1,5 @@
-//! Primer-sized workload, the main use in primalschemers: many 18-30 nt
-//! sequences through hairpin, homodimer and heterodimer, single-threaded.
+//! Mean time per call on primer-sized (18-30 nt) sequences, the main use in
+//! primalschemers.
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
@@ -20,32 +20,33 @@ fn primers(n: usize) -> Vec<String> {
         .collect()
 }
 
-fn bench_batch(c: &mut Criterion) {
+fn bench_per_call(c: &mut Criterion) {
     let args = ThalArgs::default();
     let seqs = primers(1000);
     let partner = "GTAAAACGACGGCCAGTGAATTC";
 
-    let mut group = c.benchmark_group("batch_1000_primers");
-    group.sample_size(20);
+    // Each iteration is one independent call on the next primer, so the
+    // reported time is the mean per call over realistic 18-30 nt primers.
+    let mut group = c.benchmark_group("per_call_18_30nt");
     group.bench_function("hairpin", |b| {
+        let mut k = 0;
         b.iter(|| {
-            for s in &seqs {
-                black_box(calc_hairpin(black_box(s), &args, false).ok());
-            }
+            k = (k + 1) % seqs.len();
+            calc_hairpin(black_box(&seqs[k]), &args, false)
         })
     });
     group.bench_function("homodimer", |b| {
+        let mut k = 0;
         b.iter(|| {
-            for s in &seqs {
-                black_box(calc_homodimer(black_box(s), &args, false).ok());
-            }
+            k = (k + 1) % seqs.len();
+            calc_homodimer(black_box(&seqs[k]), &args, false)
         })
     });
     group.bench_function("heterodimer", |b| {
+        let mut k = 0;
         b.iter(|| {
-            for s in &seqs {
-                black_box(calc_heterodimer(black_box(s), partner, &args, false).ok());
-            }
+            k = (k + 1) % seqs.len();
+            calc_heterodimer(black_box(&seqs[k]), partner, &args, false)
         })
     });
     group.finish();
@@ -57,6 +58,6 @@ criterion_group!(
         1000,
         Output::Flamegraph(None),
     ));
-    targets = bench_batch
+    targets = bench_per_call
 );
 criterion_main!(benches);

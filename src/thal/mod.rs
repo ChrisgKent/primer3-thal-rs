@@ -60,6 +60,11 @@ struct Context {
     init: Init,
     /// Dimers only: `right_end(i, j)` for every cell, row stride `len2`.
     right_ends: Vec<Thermo>,
+    /// Dimers only: for each anti-diagonal `ii + jj`, the ascending `ii` of
+    /// cells whose bases can pair, flattened; `pairable_off[sum]` indexes
+    /// the start of diagonal `sum`.
+    pairable_ii: Vec<u32>,
+    pairable_off: Vec<u32>,
 }
 
 impl Context {
@@ -79,6 +84,8 @@ impl Context {
             enthalpy: vec![0.0; len1 * len2],
             init,
             right_ends: Vec::new(),
+            pairable_ii: Vec::new(),
+            pairable_off: Vec::new(),
         }
     }
 
