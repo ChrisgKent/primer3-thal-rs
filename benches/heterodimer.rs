@@ -29,7 +29,7 @@ fn bench_calc_heterodimer(c: &mut Criterion) {
                     black_box(&args),
                     black_box(false),
                 );
-                black_box(res);
+                let _ = black_box(res);
             })
         });
     }

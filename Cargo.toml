@@ -30,3 +30,15 @@ harness = false
 [[bench]]
 name = "heterodimer"
 harness = false
+
+[[bench]]
+name = "batch"
+harness = false
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+debug = true

@@ -19,7 +19,7 @@ fn bench_calc_hairpin(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(seq.len()), seq, |b, s| {
             b.iter(|| {
                 let res = calc_hairpin(black_box(s), black_box(&args), black_box(false));
-                black_box(res);
+                let _ = black_box(res);
             })
         });
     }
