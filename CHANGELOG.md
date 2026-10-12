@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0
+
+Additions beyond primer3. Nothing changes with the default `ThalArgs`, and
+results still match primer3-py 2.3.0.
+
+- `ThalArgs` gains `dmso_conc`, `dmso_fact` and `formamide_conc` (defaults 0,
+  0.6, 0). When set, they correct the reported Tm as primer3's oligotm does.
+- New `nn` module: thal's nearest-neighbour model for a perfectly matched
+  duplex (constants, salt and DMSO/formamide corrections, `duplex_tm`,
+  `duplex_annealing`, and the incremental `Duplex`). Its Tm equals
+  `calc_heterodimer(seq, reverse_complement(seq)).tm`.
+- New `ThalError::InvalidBase` for the `nn` functions, which accept only
+  A/C/G/T.
+- Python bindings take `dmso_conc`, `dmso_fact` and `formamide_conc` keyword
+  arguments.
+
+Breaking: `ThalArgs` and `ThalError` have new fields and variants, so code
+that builds `ThalArgs` with every field listed, or matches `ThalError`
+exhaustively, needs updating.
+
 ## 0.1.0
 
 First release.
