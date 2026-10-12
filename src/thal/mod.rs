@@ -13,6 +13,7 @@ mod hairpin;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+use crate::nn::{salt_correction, tm_correction};
 use crate::params::{Base, ThermoParams, params};
 use crate::thermo::{Init, Thermo};
 use crate::{ThalArgs, ThalError, ThermoResult};
@@ -50,11 +51,16 @@ fn display_bytes(seq: &[u8], reverse: bool) -> Vec<u8> {
     out
 }
 
-/// thal.c's per-base-pair entropy salt correction (SantaLucia), with
-/// divalent cations converted using the free-Mg2+ term `dv - dntp`.
-fn salt_correction(args: &ThalArgs) -> f64 {
-    let dntp = if args.dv <= 0.0 { args.dv } else { args.dntp };
-    0.368 * ((args.mv + 120.0 * f64::max(0.0, args.dv - dntp).sqrt()) / 1000.0).ln()
+/// GC fraction of all the given sequences together, for the DMSO/formamide
+/// Tm correction.
+fn gc_fraction(seqs: &[&[u8]]) -> f64 {
+    let len: usize = seqs.iter().map(|s| s.len()).sum();
+    let gc = seqs
+        .iter()
+        .flat_map(|s| s.iter())
+        .filter(|b| matches!(b.to_ascii_uppercase(), b'G' | b'C'))
+        .count();
+    gc as f64 / len as f64
 }
 
 /// The two sequences and the entropy/enthalpy DP tables thal fills.

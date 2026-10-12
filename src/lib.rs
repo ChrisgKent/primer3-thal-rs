@@ -30,6 +30,12 @@
 //! # Ok::<(), primer3_thal_rs::ThalError>(())
 //! ```
 //!
+//! The [`nn`] module exposes thal's nearest-neighbour model for a perfectly
+//! matched duplex (Tm and annealing on exactly thal's assumptions, without an
+//! alignment). `ThalArgs` can also carry DMSO and formamide, which correct Tm
+//! as primer3's oligotm does. Both are additions beyond primer3, and the
+//! defaults leave results unchanged.
+//!
 //! # Features
 //!
 //! - `parallel` (default): `calc_*_batch` functions that run many
@@ -44,12 +50,14 @@
 
 #![warn(missing_docs)]
 
+pub mod nn;
 mod params;
 #[cfg(feature = "python")]
 mod python;
 mod thal;
 mod thermo;
 
+use nn::{AT_H, AT_S, DPLX_INIT_H, DPLX_INIT_S, KELVIN_OFFSET};
 pub use thal::{calc_hairpin, calc_heterodimer, calc_homodimer};
 #[cfg(feature = "parallel")]
 pub use thal::{calc_hairpin_batch, calc_heterodimer_batch, calc_homodimer_batch};
@@ -59,16 +67,11 @@ const MIN_HRPN_LOOP: usize = 3;
 /// Largest bulge/internal loop; the loop tables have this many entries.
 const MAX_LOOP: i32 = 30;
 
-const R: f64 = 1.9872; // cal/K/mol
 /// Internal-loop asymmetry penalty per unpaired base.
 const ILAS: f64 = -300.0 / 310.15;
 const ILAH: f64 = 0.0;
-/// Terminal AT penalty.
-const AT_H: f64 = 2200.0;
-const AT_S: f64 = 6.9;
 const MIN_ENTROPY_CUTOFF: f64 = -2500.0;
 const MIN_ENTROPY: f64 = -3224.0;
-const KELVIN_OFFSET: f64 = 273.15;
 /// thal ranks candidate structures by ΔG at a fixed 37 °C.
 const TEMP_KELVIN: f64 = 310.15;
 const SMALL_NON_ZERO: f64 = 0.000001;
@@ -76,12 +79,6 @@ const SMALL_NON_ZERO: f64 = 0.000001;
 const TINY_ENTROPY: f64 = 0.00000000001;
 /// Tolerance when matching DP values during traceback.
 const TRACE_EPS: f64 = 1e-5;
-/// Duplex initiation for dimers.
-const DPLX_INIT_H: f64 = 200.0;
-const DPLX_INIT_S: f64 = -5.7;
-/// Strand-concentration divisors (nM) for self-complementary and other duplexes.
-const SYMMETRIC_DNA_DIVISOR: f64 = 1_000_000_000.0;
-const DNA_DIVISOR: f64 = 4_000_000_000.0;
 
 /// At least one sequence of a pair must be no longer than this.
 const THAL_MAX_ALIGN: usize = 60;
@@ -114,10 +111,21 @@ pub struct ThalArgs {
     /// Temperature for the reported ΔG, in **Kelvin** (default 310.15,
     /// i.e. 37 °C). Set it in °C with [`ThalArgs::with_temp_c`].
     pub temp: f64,
+    /// DMSO concentration, % (default 0). Lowers Tm by
+    /// `dmso_conc · dmso_fact`. Not in primer3's thal: an extension using
+    /// primer3 oligotm's correction ([`nn::tm_correction`]).
+    pub dmso_conc: f64,
+    /// Tm reduction per % DMSO, °C (default 0.6, primer3's).
+    pub dmso_fact: f64,
+    /// Formamide concentration, mol/l (default 0). Shifts Tm by
+    /// `(0.453 · GC fraction - 2.88) · formamide_conc`. Not in primer3's
+    /// thal: an extension using primer3 oligotm's correction.
+    pub formamide_conc: f64,
 }
 
 /// primer3-py's defaults (`primer3.argdefaults`): 50 mM monovalent,
-/// 1.5 mM divalent, 0.6 mM dNTP, 50 nM DNA, 37 °C, `max_loop` 30.
+/// 1.5 mM divalent, 0.6 mM dNTP, 50 nM DNA, 37 °C, `max_loop` 30, and no
+/// DMSO or formamide.
 impl Default for ThalArgs {
     fn default() -> Self {
         Self {
@@ -127,6 +135,9 @@ impl Default for ThalArgs {
             dntp: 0.6,
             dna_conc: 50.0,
             temp: TEMP_KELVIN,
+            dmso_conc: 0.0,
+            dmso_fact: 0.6,
+            formamide_conc: 0.0,
         }
     }
 }
@@ -162,6 +173,9 @@ pub enum ThalError {
     },
     /// [`ThalArgs::max_loop`] was outside 0 to 30.
     InvalidMaxLoop(i32),
+    /// A base other than A/C/G/T where only those are allowed (the
+    /// [`nn`] duplex model; thal itself treats other bases as unpairable).
+    InvalidBase(char),
 }
 
 impl std::fmt::Display for ThalError {
@@ -174,6 +188,7 @@ impl std::fmt::Display for ThalError {
             ThalError::InvalidMaxLoop(v) => {
                 write!(f, "max_loop must be between 0 and {MAX_LOOP}, received {v}")
             }
+            ThalError::InvalidBase(b) => write!(f, "invalid base {b:?}: only A, C, G and T"),
         }
     }
 }

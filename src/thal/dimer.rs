@@ -1,10 +1,13 @@
 //! Dimer alignment (thal.c `thal_any`): fillMatrix, traceback, calcDimer.
 
-use super::{Context, display_bytes, draw, encode, no_structure, salt_correction};
+use super::{
+    Context, display_bytes, draw, encode, gc_fraction, no_structure, salt_correction, tm_correction,
+};
+use crate::nn::{dna_conc_term, is_self_complementary};
 use crate::thermo::{Init, Thermo};
 use crate::{
-    DNA_DIVISOR, DPLX_INIT_H, DPLX_INIT_S, ILAH, ILAS, KELVIN_OFFSET, R, SMALL_NON_ZERO,
-    SYMMETRIC_DNA_DIVISOR, TEMP_KELVIN, ThalArgs, ThermoResult,
+    DPLX_INIT_H, DPLX_INIT_S, ILAH, ILAS, KELVIN_OFFSET, SMALL_NON_ZERO, TEMP_KELVIN, ThalArgs,
+    ThermoResult,
 };
 
 pub(super) fn calc(
@@ -16,12 +19,8 @@ pub(super) fn calc(
     let s1 = encode(seq1, false);
     // seq2 is aligned 3'->5' against seq1.
     let s2 = encode(seq2, true);
-    let divisor = if is_self_complementary(seq1) && is_self_complementary(seq2) {
-        SYMMETRIC_DNA_DIVISOR
-    } else {
-        DNA_DIVISOR
-    };
-    let rc = R * (args.dna_conc / divisor).ln();
+    let symmetric = is_self_complementary(seq1) && is_self_complementary(seq2);
+    let rc = dna_conc_term(args.dna_conc, symmetric);
     let init = Init {
         s: DPLX_INIT_S,
         h: DPLX_INIT_H,
@@ -68,38 +67,13 @@ pub(super) fn calc(
     let salt = salt_correction(args);
     ThermoResult {
         structure_found: true,
-        tm: (dh / (ds + (n * salt) + rc)) - KELVIN_OFFSET,
+        tm: (dh / (ds + (n * salt) + rc)) - KELVIN_OFFSET
+            + tm_correction(gc_fraction(&[seq1, seq2]), args),
         dg: dh - (args.temp * (ds + (n * salt))),
         dh,
         ds: ds + (n * salt),
         ascii_structure,
     }
-}
-
-/// thal.c `symmetry_thermo`: an even-length sequence equal to its own
-/// reverse complement. Non-ACGT characters only match each other.
-fn is_self_complementary(seq: &[u8]) -> bool {
-    fn complement(b: u8) -> Option<u8> {
-        match b {
-            b'A' => Some(b'T'),
-            b'T' => Some(b'A'),
-            b'C' => Some(b'G'),
-            b'G' => Some(b'C'),
-            _ => None,
-        }
-    }
-    seq.len().is_multiple_of(2)
-        && seq
-            .iter()
-            .zip(seq.iter().rev())
-            .take(seq.len() / 2)
-            .all(|(&s, &e)| {
-                let (s, e) = (s.to_ascii_uppercase(), e.to_ascii_uppercase());
-                match (complement(s), complement(e)) {
-                    (Some(c), _) => c == e,
-                    (None, other) => other.is_none(),
-                }
-            })
 }
 
 /// Cells (ii, jj) on thal.c's anti-diagonal `d` below (i, j), nearest first.

@@ -24,6 +24,9 @@ fn thal_args(
     dna_conc: f64,
     temp_c: f64,
     max_loop: i32,
+    dmso_conc: f64,
+    dmso_fact: f64,
+    formamide_conc: f64,
 ) -> ThalArgs {
     ThalArgs {
         max_loop,
@@ -32,6 +35,9 @@ fn thal_args(
         dntp: dntp_conc,
         dna_conc,
         temp: 0.0,
+        dmso_conc,
+        dmso_fact,
+        formamide_conc,
     }
     .with_temp_c(temp_c)
 }
@@ -59,11 +65,14 @@ fn to_dicts(
 /// Hairpin thermodynamics of `seq`, as primer3.calc_hairpin.
 ///
 /// Concentrations are mM (mv_conc, dv_conc, dntp_conc) and nM (dna_conc);
-/// temp_c is in Celsius. Returns a dict with structure_found, tm (°C),
+/// temp_c is in Celsius. dmso_conc (%), dmso_fact (°C per %) and
+/// formamide_conc (mol/l) optionally correct Tm as primer3's oligotm does;
+/// they are not in primer3's thal and default to no correction. Returns a dict with structure_found, tm (°C),
 /// dg/dh (cal/mol), ds (cal/K/mol) and ascii_structure (str or None).
 /// Raises RuntimeError for an empty or >60 nt sequence, ValueError for
 /// max_loop outside 0..=30.
 #[pyfunction]
+#[pyo3(signature = (seq, mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop, output_structure, dmso_conc=0.0, dmso_fact=0.6, formamide_conc=0.0))]
 fn calc_hairpin_py(
     py: Python<'_>,
     seq: &str,
@@ -74,14 +83,28 @@ fn calc_hairpin_py(
     temp_c: f64,
     max_loop: i32,
     output_structure: bool,
+    dmso_conc: f64,
+    dmso_fact: f64,
+    formamide_conc: f64,
 ) -> PyResult<Py<PyDict>> {
-    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    let args = thal_args(
+        mv_conc,
+        dv_conc,
+        dntp_conc,
+        dna_conc,
+        temp_c,
+        max_loop,
+        dmso_conc,
+        dmso_fact,
+        formamide_conc,
+    );
     to_dict(py, calc_hairpin(seq, &args, output_structure)?)
 }
 
 /// calc_hairpin_py for a list of sequences, computed in parallel without
 /// the GIL. Returns the dicts in input order; raises on the first error.
 #[pyfunction]
+#[pyo3(signature = (seqs, mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop, output_structure, dmso_conc=0.0, dmso_fact=0.6, formamide_conc=0.0))]
 fn calc_hairpin_batch_py(
     py: Python<'_>,
     seqs: Vec<String>,
@@ -92,8 +115,21 @@ fn calc_hairpin_batch_py(
     temp_c: f64,
     max_loop: i32,
     output_structure: bool,
+    dmso_conc: f64,
+    dmso_fact: f64,
+    formamide_conc: f64,
 ) -> PyResult<Vec<Py<PyDict>>> {
-    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    let args = thal_args(
+        mv_conc,
+        dv_conc,
+        dntp_conc,
+        dna_conc,
+        temp_c,
+        max_loop,
+        dmso_conc,
+        dmso_fact,
+        formamide_conc,
+    );
     let results = py.detach(|| calc_hairpin_batch(&seqs, &args, output_structure));
     to_dicts(py, results)
 }
@@ -101,6 +137,7 @@ fn calc_hairpin_batch_py(
 /// Homodimer thermodynamics of `seq`, as primer3.calc_homodimer.
 /// Arguments and result as calc_hairpin_py.
 #[pyfunction]
+#[pyo3(signature = (seq, mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop, output_structure, dmso_conc=0.0, dmso_fact=0.6, formamide_conc=0.0))]
 fn calc_homodimer_py(
     py: Python<'_>,
     seq: &str,
@@ -111,14 +148,28 @@ fn calc_homodimer_py(
     temp_c: f64,
     max_loop: i32,
     output_structure: bool,
+    dmso_conc: f64,
+    dmso_fact: f64,
+    formamide_conc: f64,
 ) -> PyResult<Py<PyDict>> {
-    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    let args = thal_args(
+        mv_conc,
+        dv_conc,
+        dntp_conc,
+        dna_conc,
+        temp_c,
+        max_loop,
+        dmso_conc,
+        dmso_fact,
+        formamide_conc,
+    );
     to_dict(py, calc_homodimer(seq, &args, output_structure)?)
 }
 
 /// calc_homodimer_py for a list of sequences, computed in parallel without
 /// the GIL. Returns the dicts in input order; raises on the first error.
 #[pyfunction]
+#[pyo3(signature = (seqs, mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop, output_structure, dmso_conc=0.0, dmso_fact=0.6, formamide_conc=0.0))]
 fn calc_homodimer_batch_py(
     py: Python<'_>,
     seqs: Vec<String>,
@@ -129,8 +180,21 @@ fn calc_homodimer_batch_py(
     temp_c: f64,
     max_loop: i32,
     output_structure: bool,
+    dmso_conc: f64,
+    dmso_fact: f64,
+    formamide_conc: f64,
 ) -> PyResult<Vec<Py<PyDict>>> {
-    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    let args = thal_args(
+        mv_conc,
+        dv_conc,
+        dntp_conc,
+        dna_conc,
+        temp_c,
+        max_loop,
+        dmso_conc,
+        dmso_fact,
+        formamide_conc,
+    );
     let results = py.detach(|| calc_homodimer_batch(&seqs, &args, output_structure));
     to_dicts(py, results)
 }
@@ -139,6 +203,7 @@ fn calc_homodimer_batch_py(
 /// primer3.calc_heterodimer. Arguments and result as calc_hairpin_py; only
 /// raises for length if both sequences exceed 60 nt.
 #[pyfunction]
+#[pyo3(signature = (seq1, seq2, mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop, output_structure, dmso_conc=0.0, dmso_fact=0.6, formamide_conc=0.0))]
 fn calc_heterodimer_py(
     py: Python<'_>,
     seq1: &str,
@@ -150,8 +215,21 @@ fn calc_heterodimer_py(
     temp_c: f64,
     max_loop: i32,
     output_structure: bool,
+    dmso_conc: f64,
+    dmso_fact: f64,
+    formamide_conc: f64,
 ) -> PyResult<Py<PyDict>> {
-    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    let args = thal_args(
+        mv_conc,
+        dv_conc,
+        dntp_conc,
+        dna_conc,
+        temp_c,
+        max_loop,
+        dmso_conc,
+        dmso_fact,
+        formamide_conc,
+    );
     to_dict(py, calc_heterodimer(seq1, seq2, &args, output_structure)?)
 }
 
@@ -159,6 +237,7 @@ fn calc_heterodimer_py(
 /// parallel without the GIL. Returns the dicts in input order; raises on
 /// the first error.
 #[pyfunction]
+#[pyo3(signature = (pairs, mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop, output_structure, dmso_conc=0.0, dmso_fact=0.6, formamide_conc=0.0))]
 fn calc_heterodimer_batch_py(
     py: Python<'_>,
     pairs: Vec<(String, String)>,
@@ -169,8 +248,21 @@ fn calc_heterodimer_batch_py(
     temp_c: f64,
     max_loop: i32,
     output_structure: bool,
+    dmso_conc: f64,
+    dmso_fact: f64,
+    formamide_conc: f64,
 ) -> PyResult<Vec<Py<PyDict>>> {
-    let args = thal_args(mv_conc, dv_conc, dntp_conc, dna_conc, temp_c, max_loop);
+    let args = thal_args(
+        mv_conc,
+        dv_conc,
+        dntp_conc,
+        dna_conc,
+        temp_c,
+        max_loop,
+        dmso_conc,
+        dmso_fact,
+        formamide_conc,
+    );
     let results = py.detach(|| calc_heterodimer_batch(&pairs, &args, output_structure));
     to_dicts(py, results)
 }

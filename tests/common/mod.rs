@@ -26,7 +26,7 @@ impl Args {
             dv: self.dv_conc,
             dntp: self.dntp_conc,
             dna_conc: self.dna_conc,
-            temp: 0.0,
+            ..ThalArgs::default()
         }
         .with_temp_c(self.temp_c)
     }
