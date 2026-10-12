@@ -712,7 +712,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "primer3-py-rs"
+name = "primer3-thal-rs"
 version = "0.1.0"
 dependencies = [
  "criterion",

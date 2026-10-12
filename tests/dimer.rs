@@ -1,6 +1,6 @@
 mod common;
 
-use primer3_py_rs::{ThalArgs, ThalError, calc_heterodimer, calc_homodimer};
+use primer3_thal_rs::{ThalArgs, ThalError, calc_heterodimer, calc_homodimer};
 
 #[test]
 fn homodimer_matches_primer3_py() {
@@ -36,11 +36,20 @@ fn dimer_length_rules_follow_thal() {
         Err(ThalError::TooLong { len: 80, max: 60 })
     );
     assert_eq!(
-        calc_heterodimer(&"A".repeat(10_001), short, &args, false),
-        Err(ThalError::TooLong { len: 10_001, max: 10_000 })
+        calc_heterodimer("A".repeat(10_001), short, &args, false),
+        Err(ThalError::TooLong {
+            len: 10_001,
+            max: 10_000
+        })
     );
-    assert_eq!(calc_heterodimer("", short, &args, false), Err(ThalError::EmptySequence));
-    assert_eq!(calc_homodimer("", &args, false), Err(ThalError::EmptySequence));
+    assert_eq!(
+        calc_heterodimer("", short, &args, false),
+        Err(ThalError::EmptySequence)
+    );
+    assert_eq!(
+        calc_homodimer("", &args, false),
+        Err(ThalError::EmptySequence)
+    );
 }
 
 #[cfg(feature = "parallel")]
@@ -53,12 +62,12 @@ fn dimer_batch_matches_single() {
         .take(500)
         .map(|c| (c.seq.clone(), c.seq2.clone().unwrap()))
         .collect();
-    let batch = primer3_py_rs::calc_heterodimer_batch(&pairs, &args, false);
+    let batch = primer3_thal_rs::calc_heterodimer_batch(&pairs, &args, false);
     for ((a, b), r) in pairs.iter().zip(batch) {
         assert_eq!(calc_heterodimer(a, b, &args, false), r, "{a}/{b}");
     }
     let seqs: Vec<&str> = pairs.iter().map(|(a, _)| a.as_str()).collect();
-    let batch = primer3_py_rs::calc_homodimer_batch(&seqs, &args, false);
+    let batch = primer3_thal_rs::calc_homodimer_batch(&seqs, &args, false);
     for (s, r) in seqs.iter().zip(batch) {
         assert_eq!(calc_homodimer(s, &args, false), r, "{s}");
     }

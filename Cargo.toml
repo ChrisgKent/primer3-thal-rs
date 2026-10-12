@@ -1,10 +1,10 @@
 [package]
-name = "primer3-py-rs"
+name = "primer3-thal-rs"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "primer3_py_rs"
+name = "primer3_thal_rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

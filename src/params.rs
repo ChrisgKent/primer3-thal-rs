@@ -96,6 +96,7 @@ impl ThermoParams {
     }
 }
 
+/// Bonus entry for `key` in a table sorted by sequence, if present.
 fn find_loop<const N: usize>(table: &[([Base; N], Thermo)], key: &[Base]) -> Option<Thermo> {
     table
         .binary_search_by(|(k, _)| k.as_slice().cmp(key))
@@ -159,13 +160,13 @@ impl<'a> Pair<'a> {
     }
 }
 
+/// A table value: a number, or `inf` (any case) for a forbidden entry.
 fn parse_value(token: &str, name: &str) -> Result<f64, String> {
     let t = token.trim();
     if t.eq_ignore_ascii_case("inf") {
         Ok(f64::INFINITY)
     } else {
-        t.parse()
-            .map_err(|_| format!("{name}: bad value {t:?}"))
+        t.parse().map_err(|_| format!("{name}: bad value {t:?}"))
     }
 }
 
@@ -282,7 +283,10 @@ fn read_loop_bonus<const N: usize>(mut pair: Pair<'_>) -> Result<Vec<([Base; N],
         for (k, b) in key.iter_mut().zip(key_s.bytes()) {
             *k = Base::from_ascii(b);
         }
-        out.push((key, Thermo::new(parse_value(s, pair.name)?, parse_value(h, pair.name)?)));
+        out.push((
+            key,
+            Thermo::new(parse_value(s, pair.name)?, parse_value(h, pair.name)?),
+        ));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(out)
@@ -350,7 +354,10 @@ mod tests {
         assert_eq!(p.triloops.len(), 16);
         assert_eq!(p.tetraloops.len(), 77);
         // Spot-check a value from each file against primer3_config.
-        assert_eq!(p.stack(Base::A, Base::A, Base::T, Base::T), Thermo::new(-22.2, -7900.0));
+        assert_eq!(
+            p.stack(Base::A, Base::A, Base::T, Base::T),
+            Thermo::new(-22.2, -7900.0)
+        );
         assert_eq!(p.hairpin_loop[2], Thermo::new(-11.28, 0.0));
         assert!(p.stack(Base::N, Base::A, Base::T, Base::T).h.is_infinite());
     }

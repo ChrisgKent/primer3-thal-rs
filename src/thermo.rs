@@ -76,6 +76,7 @@ impl Add for Thermo {
     }
 }
 
+/// thal.c `equal()`: both finite and within `TRACE_EPS`.
 fn approx_eq(a: f64, b: f64) -> bool {
     a.is_finite() && b.is_finite() && (a - b).abs() < TRACE_EPS
 }

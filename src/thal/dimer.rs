@@ -1,18 +1,22 @@
 //! Dimer alignment (thal.c `thal_any`): fillMatrix, traceback, calcDimer.
 
-use super::{Context, draw, encode, no_structure, salt_correction};
+use super::{Context, display_bytes, draw, encode, no_structure, salt_correction};
 use crate::thermo::{Init, Thermo};
 use crate::{
     DNA_DIVISOR, DPLX_INIT_H, DPLX_INIT_S, ILAH, ILAS, KELVIN_OFFSET, R, SMALL_NON_ZERO,
     SYMMETRIC_DNA_DIVISOR, TEMP_KELVIN, ThalArgs, ThermoResult,
 };
 
-pub(super) fn calc(seq1: &str, seq2: &str, args: &ThalArgs, output_structure: bool) -> ThermoResult {
-    let (oligo1, s1) = encode(seq1, false);
+pub(super) fn calc(
+    seq1: &[u8],
+    seq2: &[u8],
+    args: &ThalArgs,
+    output_structure: bool,
+) -> ThermoResult {
+    let s1 = encode(seq1, false);
     // seq2 is aligned 3'->5' against seq1.
-    let (oligo2, s2) = encode(seq2, true);
-    let divisor = if is_self_complementary(seq1.as_bytes()) && is_self_complementary(seq2.as_bytes())
-    {
+    let s2 = encode(seq2, true);
+    let divisor = if is_self_complementary(seq1) && is_self_complementary(seq2) {
         SYMMETRIC_DNA_DIVISOR
     } else {
         DNA_DIVISOR
@@ -42,7 +46,14 @@ pub(super) fn calc(seq1: &str, seq2: &str, args: &ThalArgs, output_structure: bo
     let ds = best.s + end.s + init.s;
 
     let (ps1, ps2) = ctx.traceback_dimer(bi, bj, max_loop);
-    let ascii_structure = output_structure.then(|| draw::dimer(&ps1, &ps2, &oligo1, &oligo2));
+    let ascii_structure = output_structure.then(|| {
+        draw::dimer(
+            &ps1,
+            &ps2,
+            &display_bytes(seq1, false),
+            &display_bytes(seq2, true),
+        )
+    });
 
     if !args.temp.is_finite() {
         return ThermoResult {
@@ -195,10 +206,15 @@ impl Context {
         let t0 = (c0.h + init.h + end.h) / (c0.s + init.s + end.s + init.rc);
 
         let prev = self.dp(i - 1, j - 1);
-        let stack = self.p.stack(self.s1[i - 1], self.s1[i], self.s2[j - 1], self.s2[j]);
+        let stack = self
+            .p
+            .stack(self.s1[i - 1], self.s1[i], self.s2[j - 1], self.s2[j]);
         let (mut c1, t1) = if prev.is_finite() && stack.is_finite() {
             let c1 = prev + stack;
-            (c1, (c1.h + init.h + end.h) / (c1.s + init.s + end.s + init.rc))
+            (
+                c1,
+                (c1.h + init.h + end.h) / (c1.s + init.s + end.s + init.rc),
+            )
         } else {
             (Thermo::INVALID, Thermo::INVALID.tm(&init))
         };
@@ -325,7 +341,12 @@ impl Context {
     }
 
     /// Paired positions (1-based partner, 0 = unpaired) for each strand.
-    fn traceback_dimer(&self, mut i: usize, mut j: usize, max_loop: usize) -> (Vec<usize>, Vec<usize>) {
+    fn traceback_dimer(
+        &self,
+        mut i: usize,
+        mut j: usize,
+        max_loop: usize,
+    ) -> (Vec<usize>, Vec<usize>) {
         let mut ps1 = vec![0; self.len1];
         let mut ps2 = vec![0; self.len2];
         ps1[i - 1] = j;
@@ -338,7 +359,8 @@ impl Context {
             let stacked = i > 1
                 && j > 1
                 && cur.approx_eq(
-                    self.p.stack(self.s1[i - 1], self.s1[i], self.s2[j - 1], self.s2[j])
+                    self.p
+                        .stack(self.s1[i - 1], self.s1[i], self.s2[j - 1], self.s2[j])
                         + self.dp(i - 1, j - 1),
                 );
             let next = if stacked {

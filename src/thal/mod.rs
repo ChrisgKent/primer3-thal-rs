@@ -26,19 +26,32 @@ enum Mode {
     Trace,
 }
 
-/// Uppercased bytes (for drawing) and the padded, encoded sequence.
-fn encode(seq: &str, reverse: bool) -> (Vec<u8>, Vec<Base>) {
-    let mut oligo: Vec<u8> = seq.bytes().map(|b| b.to_ascii_uppercase()).collect();
+/// Encode `seq` for the DP: 1-based, with an `N` sentinel at each end,
+/// optionally reversed (the second strand of a dimer is aligned 3'->5').
+fn encode(seq: &[u8], reverse: bool) -> Vec<Base> {
+    let mut bases = Vec::with_capacity(seq.len() + 2);
+    bases.push(Base::N);
     if reverse {
-        oligo.reverse();
+        bases.extend(seq.iter().rev().map(|&b| Base::from_ascii(b)));
+    } else {
+        bases.extend(seq.iter().map(|&b| Base::from_ascii(b)));
     }
-    let mut bases = Vec::with_capacity(oligo.len() + 2);
     bases.push(Base::N);
-    bases.extend(oligo.iter().map(|&b| Base::from_ascii(b)));
-    bases.push(Base::N);
-    (oligo, bases)
+    bases
 }
 
+/// Uppercased (and optionally reversed) bytes, as thal.c prints them in
+/// structure drawings. Only built when a structure is requested.
+fn display_bytes(seq: &[u8], reverse: bool) -> Vec<u8> {
+    let mut out: Vec<u8> = seq.iter().map(u8::to_ascii_uppercase).collect();
+    if reverse {
+        out.reverse();
+    }
+    out
+}
+
+/// thal.c's per-base-pair entropy salt correction (SantaLucia), with
+/// divalent cations converted using the free-Mg2+ term `dv - dntp`.
 fn salt_correction(args: &ThalArgs) -> f64 {
     let dntp = if args.dv <= 0.0 { args.dv } else { args.dntp };
     0.368 * ((args.mv + 120.0 * f64::max(0.0, args.dv - dntp).sqrt()) / 1000.0).ln()
@@ -176,13 +189,46 @@ impl Context {
     }
 }
 
+/// Result when no structure forms: `structure_found` false, all zero.
 fn no_structure() -> ThermoResult {
     ThermoResult::default()
 }
 
-/// Hairpin (monomer secondary structure), primer3's `thal_hairpin` mode.
+/// Hairpin (monomer secondary structure) thermodynamics of `seq`, as
+/// primer3-py's `calc_hairpin` (thal.c `thal_hairpin` mode).
+///
+/// `seq` is any byte sequence, e.g. `&str`, `String`, `&[u8]` or `Vec<u8>`;
+/// it is read 5'->3', case-insensitively, and any byte other than A/C/G/T
+/// (or the digits 0-3, as in primer3) is treated as a base that pairs with
+/// nothing. With `output_structure`, [`ThermoResult::ascii_structure`] holds
+/// primer3's two-line drawing.
+///
+/// # Errors
+///
+/// [`ThalError::EmptySequence`], [`ThalError::TooLong`] if `seq` is longer
+/// than 60 bases, or [`ThalError::InvalidMaxLoop`].
+///
+/// # Example
+///
+/// ```
+/// use primer3_thal_rs::{ThalArgs, calc_hairpin};
+///
+/// let res = calc_hairpin("CCCCCATCCGATCAGGGGG", &ThalArgs::default(), false)?;
+/// assert!(res.structure_found);
+/// assert!((res.tm - 66.747).abs() < 1e-3);
+/// # Ok::<(), primer3_thal_rs::ThalError>(())
+/// ```
 pub fn calc_hairpin(
-    seq: &str,
+    seq: impl AsRef<[u8]>,
+    args: &ThalArgs,
+    output_structure: bool,
+) -> Result<ThermoResult, ThalError> {
+    hairpin_bytes(seq.as_ref(), args, output_structure)
+}
+
+/// Non-generic body of [`calc_hairpin`]: input checks, then the DP.
+fn hairpin_bytes(
+    seq: &[u8],
     args: &ThalArgs,
     output_structure: bool,
 ) -> Result<ThermoResult, ThalError> {
@@ -199,10 +245,45 @@ pub fn calc_hairpin(
     Ok(hairpin::calc(seq, args, output_structure))
 }
 
-/// Heterodimer, primer3's `thal_any` mode.
+/// Heterodimer thermodynamics of `seq1` binding `seq2`, as primer3-py's
+/// `calc_heterodimer` (thal.c `thal_any` mode).
+///
+/// Both sequences are given 5'->3', exactly as the primers are written; the
+/// second is reversed internally. Sequence handling is as for
+/// [`calc_hairpin`]. With `output_structure`,
+/// [`ThermoResult::ascii_structure`] holds primer3's four-line duplex drawing.
+///
+/// # Errors
+///
+/// [`ThalError::EmptySequence`]; [`ThalError::TooLong`] if *both* sequences
+/// are longer than 60 bases (one may be longer, up to 10,000), as in primer3;
+/// or [`ThalError::InvalidMaxLoop`].
+///
+/// # Example
+///
+/// ```
+/// use primer3_thal_rs::{ThalArgs, calc_heterodimer};
+///
+/// // Two primers with complementary 3' ends.
+/// let args = ThalArgs::default();
+/// let res = calc_heterodimer("GTAAAACGACGGCCAGT", b"CAGGAAACAGCTATGACACTGG", &args, false)?;
+/// assert!(res.structure_found);
+/// assert!(res.dg < 0.0);
+/// # Ok::<(), primer3_thal_rs::ThalError>(())
+/// ```
 pub fn calc_heterodimer(
-    seq1: &str,
-    seq2: &str,
+    seq1: impl AsRef<[u8]>,
+    seq2: impl AsRef<[u8]>,
+    args: &ThalArgs,
+    output_structure: bool,
+) -> Result<ThermoResult, ThalError> {
+    heterodimer_bytes(seq1.as_ref(), seq2.as_ref(), args, output_structure)
+}
+
+/// Non-generic body of [`calc_heterodimer`]: input checks, then the DP.
+fn heterodimer_bytes(
+    seq1: &[u8],
+    seq2: &[u8],
     args: &ThalArgs,
     output_structure: bool,
 ) -> Result<ThermoResult, ThalError> {
@@ -229,13 +310,21 @@ pub fn calc_heterodimer(
     Ok(dimer::calc(seq1, seq2, args, output_structure))
 }
 
-/// Homodimer: primer3-py runs `thal(seq, seq, thal_any)`.
+/// Homodimer (self-dimer) thermodynamics of `seq`, as primer3-py's
+/// `calc_homodimer`, which runs the heterodimer alignment of `seq` with
+/// itself.
+///
+/// # Errors
+///
+/// As [`calc_heterodimer`]; a homodimer of more than 60 bases is
+/// [`ThalError::TooLong`].
 pub fn calc_homodimer(
-    seq: &str,
+    seq: impl AsRef<[u8]>,
     args: &ThalArgs,
     output_structure: bool,
 ) -> Result<ThermoResult, ThalError> {
-    calc_heterodimer(seq, seq, args, output_structure)
+    let seq = seq.as_ref();
+    heterodimer_bytes(seq, seq, args, output_structure)
 }
 
 #[cfg(feature = "parallel")]
@@ -243,8 +332,9 @@ fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync + Send) -> 
     items.par_iter().map(f).collect()
 }
 
+/// [`calc_hairpin`] for many sequences in parallel (rayon), in input order.
 #[cfg(feature = "parallel")]
-pub fn calc_hairpin_batch<T: AsRef<str> + Sync>(
+pub fn calc_hairpin_batch<T: AsRef<[u8]> + Sync>(
     seqs: &[T],
     args: &ThalArgs,
     output_structure: bool,
@@ -252,8 +342,9 @@ pub fn calc_hairpin_batch<T: AsRef<str> + Sync>(
     par_map(seqs, |s| calc_hairpin(s.as_ref(), args, output_structure))
 }
 
+/// [`calc_homodimer`] for many sequences in parallel (rayon), in input order.
 #[cfg(feature = "parallel")]
-pub fn calc_homodimer_batch<T: AsRef<str> + Sync>(
+pub fn calc_homodimer_batch<T: AsRef<[u8]> + Sync>(
     seqs: &[T],
     args: &ThalArgs,
     output_structure: bool,
@@ -261,11 +352,14 @@ pub fn calc_homodimer_batch<T: AsRef<str> + Sync>(
     par_map(seqs, |s| calc_homodimer(s.as_ref(), args, output_structure))
 }
 
+/// [`calc_heterodimer`] for many pairs in parallel (rayon), in input order.
 #[cfg(feature = "parallel")]
-pub fn calc_heterodimer_batch(
-    pairs: &[(String, String)],
+pub fn calc_heterodimer_batch<A: AsRef<[u8]> + Sync, B: AsRef<[u8]> + Sync>(
+    pairs: &[(A, B)],
     args: &ThalArgs,
     output_structure: bool,
 ) -> Vec<Result<ThermoResult, ThalError>> {
-    par_map(pairs, |(a, b)| calc_heterodimer(a, b, args, output_structure))
+    par_map(pairs, |(a, b)| {
+        calc_heterodimer(a, b, args, output_structure)
+    })
 }

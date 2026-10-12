@@ -3,7 +3,7 @@ requires = ["maturin>=1.10,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "primer3_py_rs"
+name = "primer3_thal_rs"
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Rust",
@@ -18,4 +18,4 @@ dependencies = [
 [tool.maturin]
 bindings = "pyo3"
 features = ["python", "pyo3/extension-module"]
-module-name = "primer3_py_rs"
+module-name = "primer3_thal_rs"

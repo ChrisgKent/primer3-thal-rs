@@ -3,14 +3,17 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
-use primer3_py_rs::{ThalArgs, calc_hairpin, calc_heterodimer, calc_homodimer};
+use primer3_thal_rs::{ThalArgs, calc_hairpin, calc_heterodimer, calc_homodimer};
 
 /// Small deterministic LCG so the workload is stable across runs.
 struct Lcg(u64);
 
 impl Lcg {
     fn next(&mut self) -> usize {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.0 >> 33) as usize
     }
 
@@ -49,7 +52,7 @@ fn primer_pairs(n: usize) -> Vec<(String, String)> {
     (0..n)
         .map(|_| {
             let a = rng.primer();
-            let b = if rng.next() % 5 == 0 {
+            let b = if rng.next().is_multiple_of(5) {
                 let k = 4 + rng.next() % 7;
                 let tail_len = 18 + rng.next() % 13 - k;
                 let mut b = rng.seq(tail_len);

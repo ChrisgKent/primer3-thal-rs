@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
-use primer3_py_rs::{ThalArgs, calc_heterodimer, calc_homodimer};
+use primer3_thal_rs::{ThalArgs, calc_heterodimer, calc_homodimer};
 
 fn bench_calc_heterodimer(c: &mut Criterion) {
     let args = ThalArgs::default();

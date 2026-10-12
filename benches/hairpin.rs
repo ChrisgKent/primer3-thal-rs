@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
-use primer3_py_rs::{calc_hairpin, ThalArgs};
+use primer3_thal_rs::{ThalArgs, calc_hairpin};
 
 fn bench_calc_hairpin(c: &mut Criterion) {
     let args = ThalArgs::default();

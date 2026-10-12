@@ -1,12 +1,14 @@
 //! Hairpin alignment (thal.c `thal_hairpin`): fillMatrix2, calc_terminal_bp,
 //! tracebacku, calcHairpin.
 
-use super::{Context, Mode, draw, encode, no_structure, salt_correction};
+use super::{Context, Mode, display_bytes, draw, encode, no_structure, salt_correction};
 use crate::thermo::{Init, Thermo};
-use crate::{ILAH, ILAS, KELVIN_OFFSET, MIN_HRPN_LOOP, SMALL_NON_ZERO, TINY_ENTROPY, ThalArgs, ThermoResult};
+use crate::{
+    ILAH, ILAS, KELVIN_OFFSET, MIN_HRPN_LOOP, SMALL_NON_ZERO, TINY_ENTROPY, ThalArgs, ThermoResult,
+};
 
-pub(super) fn calc(seq: &str, args: &ThalArgs, output_structure: bool) -> ThermoResult {
-    let (oligo, s1) = encode(seq, false);
+pub(super) fn calc(seq: &[u8], args: &ThalArgs, output_structure: bool) -> ThermoResult {
+    let s1 = encode(seq, false);
     let init = Init {
         s: -TINY_ENTROPY,
         h: 0.0,
@@ -29,7 +31,7 @@ pub(super) fn calc(seq: &str, args: &ThalArgs, output_structure: bool) -> Thermo
     // calcHairpin: thal.c counts paired bases among the first len - 1.
     let mut result = ThermoResult {
         structure_found: true,
-        ascii_structure: output_structure.then(|| draw::hairpin(&bp, &oligo)),
+        ascii_structure: output_structure.then(|| draw::hairpin(&bp, &display_bytes(seq, false))),
         ..ThermoResult::default()
     };
     if best.s.is_finite() {
@@ -319,7 +321,13 @@ impl Context {
     fn terminal_bp(&self, temp: f64) -> (Vec<Thermo>, Vec<Thermo>) {
         let init = self.init;
         let zero_tm = Thermo::ZERO.tm(&init);
-        let base = |e: Thermo| if e.tm(&init) >= zero_tm { e } else { Thermo::ZERO };
+        let base = |e: Thermo| {
+            if e.tm(&init) >= zero_tm {
+                e
+            } else {
+                Thermo::ZERO
+            }
+        };
         let mut ends = vec![Thermo::PAIRABLE; self.len1 + 1];
         ends[0] = Thermo::INVALID;
         ends[1] = Thermo::INVALID;
@@ -340,7 +348,11 @@ impl Context {
                 0 => ends[i - 1],
                 k => {
                     let c = cands[k - 1];
-                    if c.h - (temp * c.s) < 0.0 { c } else { ends[i - 1] }
+                    if c.h - (temp * c.s) < 0.0 {
+                        c
+                    } else {
+                        ends[i - 1]
+                    }
                 }
             };
         }

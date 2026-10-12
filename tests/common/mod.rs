@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use primer3_py_rs::{ThalArgs, ThalError, ThermoResult};
+use primer3_thal_rs::{ThalArgs, ThalError, ThermoResult};
 use serde::{Deserialize, Deserializer};
 
 /// Absolute tolerance for tm, dg, dh, ds against primer3-py.
@@ -155,7 +155,11 @@ pub fn check_all(name: &str, cases: &[Case], f: impl Fn(&Case) -> Result<ThermoR
             "{name}: {} of {} cases failed:\n{}",
             failures.len(),
             cases.len(),
-            shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+            shown
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 }
