@@ -1,6 +1,7 @@
 //! Mean time per call on primer-sized (18-30 nt) sequences, the main use in
 //! primalschemers. Each iteration is one independent call on the next input.
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
+#[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
 
 use primer3_thal_rs::{ThalArgs, calc_hairpin, calc_heterodimer, calc_homodimer};
@@ -97,12 +98,17 @@ fn bench_per_call(c: &mut Criterion) {
     group.finish();
 }
 
+/// Criterion with flamegraph profiling (`--profile-time`) where supported.
+fn config() -> Criterion {
+    let c = Criterion::default();
+    #[cfg(unix)]
+    let c = c.with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
+    c
+}
+
 criterion_group!(
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(
-        1000,
-        Output::Flamegraph(None),
-    ));
+    config = config();
     targets = bench_per_call
 );
 criterion_main!(benches);

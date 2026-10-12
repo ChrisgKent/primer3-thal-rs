@@ -1,4 +1,5 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+#[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
 
 use primer3_thal_rs::{ThalArgs, calc_heterodimer, calc_homodimer};
@@ -54,12 +55,17 @@ fn bench_calc_homodimer(c: &mut Criterion) {
     group.finish();
 }
 
+/// Criterion with flamegraph profiling (`--profile-time`) where supported.
+fn config() -> Criterion {
+    let c = Criterion::default();
+    #[cfg(unix)]
+    let c = c.with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    c
+}
+
 criterion_group!(
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(
-        100,
-        Output::Flamegraph(None),
-    ));
+    config = config();
     targets = bench_calc_heterodimer, bench_calc_homodimer
 );
 criterion_main!(benches);
