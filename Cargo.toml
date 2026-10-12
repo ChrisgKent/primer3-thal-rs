@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "LLM transpilation of primer3-py v2.3.0's thal to Rust: hairpin, homodimer and heterodimer ΔG/Tm for DNA oligos"
 license = "GPL-2.0-or-later"
+repository = "https://github.com/ChrisgKent/primer3-thal-rs"
 readme = "README.md"
 keywords = ["primer3", "pcr", "primer", "thermodynamics", "dna"]
 categories = ["science::bioinformatics"]

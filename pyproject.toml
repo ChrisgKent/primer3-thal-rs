@@ -22,6 +22,9 @@ dependencies = []
 # Reference implementation, used to generate and check test fixtures.
 test = ["primer3-py==2.3.0"]
 
+[project.urls]
+Repository = "https://github.com/ChrisgKent/primer3-thal-rs"
+
 [tool.maturin]
 bindings = "pyo3"
 features = ["python", "pyo3/extension-module"]
