@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "primer3_thal_rs"
-description = "Rust port of primer3's thal: hairpin, homodimer and heterodimer ΔG/Tm, matching primer3-py"
+description = "LLM transpilation of primer3-py v2.3.0's thal to Rust: hairpin, homodimer and heterodimer ΔG/Tm"
 readme = "README.md"
 license = { text = "GPL-2.0-or-later" }
 requires-python = ">=3.8"

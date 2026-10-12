@@ -1,6 +1,12 @@
 //! A pure-Rust port of primer3's `thal` thermodynamic alignment: hairpin,
 //! homodimer and heterodimer ΔG, ΔH, ΔS and Tm for DNA oligos.
 //!
+//! **This crate is an LLM transpilation of
+//! [primer3-py v2.3.0](https://github.com/libnano/primer3-py/tree/v2.3.0)**
+//! (its bundled `thal.c`, parameter tables and `thermoanalysis.pyx`
+//! defaults), restructured and optimised in Rust. It is not an official
+//! primer3 or primer3-py project, and it reproduces that version only.
+//!
 //! Results match [primer3-py](https://github.com/libnano/primer3-py)'s
 //! `calc_hairpin`, `calc_homodimer` and `calc_heterodimer` (primer3 2.x
 //! `thal.c`): the test suite checks about 18,000 generated cases against

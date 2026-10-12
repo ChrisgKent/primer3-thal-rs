@@ -5,6 +5,30 @@ A pure-Rust port of [primer3](https://github.com/primer3-org/primer3)'s
 heterodimer ΔG, ΔH, ΔS and Tm for DNA oligos, with results that match
 [primer3-py](https://github.com/libnano/primer3-py).
 
+> [!IMPORTANT]
+> **This crate is an LLM transpilation of one specific version of
+> primer3-py: [v2.3.0](https://github.com/libnano/primer3-py/tree/v2.3.0).**
+>
+> - **What was ported.** The C sources and data shipped in that release were
+>   translated to Rust with the help of a large language model:
+>   - `primer3/src/libprimer3/thal.c`
+>   - its parameter tables in `primer3_config/`
+>   - the defaults and input checks from `thermoanalysis.pyx`
+>
+>   The output was then restructured into idiomatic Rust and optimised. It is
+>   not an official primer3 or primer3-py project.
+> - **How it was checked.** About 18,000 generated cases are compared against
+>   primer3-py 2.3.0 (see *Exact* below). It has not been reviewed line by line
+>   by the primer3 authors.
+> - **Other versions.** It reproduces primer3-py 2.3.0 only. Changes made to
+>   primer3 or primer3-py after that release are not included, and results may
+>   differ from other versions.
+>
+> (The source checkout used was commit
+> [`3f902fb`](https://github.com/libnano/primer3-py/commit/3f902fba2ead530677ba369120123a5c77279a89),
+> one commit after the v2.3.0 tag. That commit only changes two docstrings, so
+> the code and tables are identical to v2.3.0.)
+
 - **Exact.** About 18,000 generated cases are checked against primer3-py
   2.3.0. All agree to within 1e-10 (the tests allow 1e-6), and ASCII structures
   match character for character.

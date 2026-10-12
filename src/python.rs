@@ -184,7 +184,10 @@ fn primer3_thal_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calc_homodimer_batch_py, m)?)?;
     m.add_function(wrap_pyfunction!(calc_heterodimer_py, m)?)?;
     m.add_function(wrap_pyfunction!(calc_heterodimer_batch_py, m)?)?;
-    m.add("__doc__", "Rust port of primer3 thal (PyO3 bindings)")?;
+    m.add(
+        "__doc__",
+        "LLM transpilation of primer3-py v2.3.0's thal to Rust (PyO3 bindings)",
+    )?;
     m.add("version", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
