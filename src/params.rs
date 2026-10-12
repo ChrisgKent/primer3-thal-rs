@@ -288,7 +288,7 @@ fn read_loop_bonus<const N: usize>(mut pair: Pair<'_>) -> Result<Vec<([Base; N],
             Thermo::new(parse_value(s, pair.name)?, parse_value(h, pair.name)?),
         ));
     }
-    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.sort_by_key(|entry| entry.0);
     Ok(out)
 }
 
