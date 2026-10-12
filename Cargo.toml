@@ -2,6 +2,25 @@
 name = "primer3-thal-rs"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "Pure-Rust port of primer3's thal: hairpin, homodimer and heterodimer ΔG/Tm for DNA oligos, matching primer3-py"
+license = "GPL-2.0-or-later"
+readme = "README.md"
+keywords = ["primer3", "pcr", "primer", "thermodynamics", "dna"]
+categories = ["science::bioinformatics"]
+# Only what's needed to build: the fixtures (~6 MB) and the primer3-py
+# submodule stay in the repository.
+include = [
+    "/src/**/*.rs",
+    "/primer3_config/*",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+]
+
+[package.metadata.docs.rs]
+all-features = false
+features = ["parallel"]
 
 [lib]
 name = "primer3_thal_rs"

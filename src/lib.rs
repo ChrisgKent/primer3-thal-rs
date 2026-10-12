@@ -196,6 +196,11 @@ pub struct ThermoResult {
     pub ascii_structure: Option<String>,
 }
 
+/// Compiles and runs the README's example as a doctest.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

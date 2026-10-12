@@ -36,11 +36,14 @@ wheels = [
 ]
 
 [[package]]
-name = "primer3-py-rs"
+name = "primer3-thal-rs"
 source = { editable = "." }
-dependencies = [
+
+[package.optional-dependencies]
+test = [
     { name = "primer3-py" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "primer3-py", specifier = ">=2.3.0" }]
+requires-dist = [{ name = "primer3-py", marker = "extra == 'test'", specifier = "==2.3.0" }]
+provides-extras = ["test"]

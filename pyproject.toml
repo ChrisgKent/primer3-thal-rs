@@ -4,16 +4,23 @@ build-backend = "maturin"
 
 [project]
 name = "primer3_thal_rs"
+description = "Rust port of primer3's thal: hairpin, homodimer and heterodimer ΔG/Tm, matching primer3-py"
+readme = "README.md"
+license = { text = "GPL-2.0-or-later" }
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dynamic = ["version"]
-dependencies = [
-    "primer3-py>=2.3.0",
-]
+dependencies = []
+
+[project.optional-dependencies]
+# Reference implementation, used to generate and check test fixtures.
+test = ["primer3-py==2.3.0"]
 
 [tool.maturin]
 bindings = "pyo3"
