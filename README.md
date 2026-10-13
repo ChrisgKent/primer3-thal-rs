@@ -43,7 +43,7 @@ heterodimer ΔG, ΔH, ΔS and Tm for DNA oligos, with results that match
 
 ```toml
 [dependencies]
-primer3-thal-rs = "0.1"
+primer3-thal-rs = "0.2"
 ```
 
 ```rust
@@ -101,6 +101,33 @@ The same rules as primer3 apply:
   pairs with nothing.
 - Pass primers exactly as written, 5′→3′. For a heterodimer the second
   sequence is reversed internally.
+
+## Additions beyond primer3
+
+These are not part of primer3's thal. With the default `ThalArgs` they change
+nothing, so results still match primer3-py exactly.
+
+- **DMSO and formamide.** `ThalArgs` has `dmso_conc`, `dmso_fact` and
+  `formamide_conc` (defaults 0, 0.6 and 0). When set, they shift the reported
+  Tm (only Tm; ΔG, ΔH and ΔS are unchanged) by primer3 oligotm's correction:
+  `-dmso_conc·dmso_fact + (0.453·GC - 2.88)·formamide_conc`. GC is the GC
+  fraction of the input sequence(s).
+- **`nn` module.** thal's own nearest-neighbour model for a perfectly matched
+  duplex, so other code can use exactly the same assumptions:
+  - its constants (R, initiation, terminal A-T penalty, concentration divisors);
+  - its salt correction and DMSO/formamide correction;
+  - `duplex_tm` / `duplex_annealing`, and `Duplex` to build an oligo one base
+    at a time.
+
+  `nn::duplex_tm(seq, &args)` equals
+  `calc_heterodimer(seq, reverse_complement(seq), &args).tm` (to 1e-9 °C) but
+  needs no alignment. Annealing is the percentage bound at a temperature, 50 %
+  at the uncorrected Tm.
+
+  This is **not** primer3's `calc_tm` (oligotm), which uses different
+  initiation, terminal and symmetry terms. For typical primers it reads
+  0.04–0.1 °C lower than `calc_tm`, and for self-complementary sequences
+  about 1 °C higher.
 
 ## Features
 

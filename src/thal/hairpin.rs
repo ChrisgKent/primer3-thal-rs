@@ -1,7 +1,9 @@
 //! Hairpin alignment (thal.c `thal_hairpin`): fillMatrix2, calc_terminal_bp,
 //! tracebacku, calcHairpin.
 
-use super::{Context, Mode, display_bytes, draw, encode, no_structure, salt_correction};
+use super::{
+    Context, Mode, display_bytes, draw, encode, no_structure, salt_correction, seq_tm_correction,
+};
 use crate::thermo::{Init, Thermo};
 use crate::{
     ILAH, ILAS, KELVIN_OFFSET, MIN_HRPN_LOOP, SMALL_NON_ZERO, TINY_ENTROPY, ThalArgs, ThermoResult,
@@ -37,7 +39,7 @@ pub(super) fn calc(seq: &[u8], args: &ThalArgs, output_structure: bool) -> Therm
     if best.s.is_finite() {
         let pairs = bp[..len - 1].iter().filter(|&&p| p > 0).count();
         let salt = ((pairs / 2) as f64 - 1.0) * salt_correction(args);
-        result.tm = (best.h / (best.s + salt)) - KELVIN_OFFSET;
+        result.tm = (best.h / (best.s + salt)) - KELVIN_OFFSET + seq_tm_correction(&[seq], args);
         result.dg = best.h - (args.temp * (best.s + salt));
         result.dh = best.h;
         result.ds = best.s + salt;

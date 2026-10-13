@@ -30,6 +30,18 @@ impl Base {
         }
     }
 
+    /// Watson-Crick partner; `N` for `N`.
+    #[cfg(test)]
+    pub fn complement(self) -> Base {
+        match self {
+            Base::A => Base::T,
+            Base::C => Base::G,
+            Base::G => Base::C,
+            Base::T => Base::A,
+            Base::N => Base::N,
+        }
+    }
+
     /// Watson-Crick pairing only.
     pub fn pairs_with(self, other: Base) -> bool {
         matches!(

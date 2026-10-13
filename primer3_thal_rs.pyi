@@ -20,6 +20,9 @@ def calc_hairpin_py(
     temp_c: float,
     max_loop: int,
     output_structure: bool,
+    dmso_conc: float = 0.0,
+    dmso_fact: float = 0.6,
+    formamide_conc: float = 0.0,
 ) -> ThermoResult:
     """
     Compute hairpin thermodynamics for a single DNA sequence.
@@ -33,6 +36,10 @@ def calc_hairpin_py(
     - temp_c: temperature in Celsius.
     - max_loop: maximum loop size.
     - output_structure: whether to compute ASCII structure.
+    - dmso_conc: DMSO concentration (%v/v); dmso_fact: Tm drop per %.
+    - formamide_conc: formamide concentration (mol/L).
+      Both shift only the reported Tm, by primer3 oligotm's formula
+      (an extension: primer3's thal has neither).
 
     Returns
     - ThermoResult dict with tm/ds/dh/dg and structure_found.
@@ -50,6 +57,9 @@ def calc_hairpin_batch_py(
     temp_c: float,
     max_loop: int,
     output_structure: bool,
+    dmso_conc: float = 0.0,
+    dmso_fact: float = 0.6,
+    formamide_conc: float = 0.0,
 ) -> List[ThermoResult]:
     """
     Compute hairpin thermodynamics for many sequences in parallel.
@@ -71,6 +81,9 @@ def calc_homodimer_py(
     temp_c: float,
     max_loop: int,
     output_structure: bool,
+    dmso_conc: float = 0.0,
+    dmso_fact: float = 0.6,
+    formamide_conc: float = 0.0,
 ) -> ThermoResult:
     """
     Compute homodimer thermodynamics for one DNA sequence (thal_any alignment
@@ -93,6 +106,9 @@ def calc_homodimer_batch_py(
     temp_c: float,
     max_loop: int,
     output_structure: bool,
+    dmso_conc: float = 0.0,
+    dmso_fact: float = 0.6,
+    formamide_conc: float = 0.0,
 ) -> List[ThermoResult]:
     """
     Compute homodimer thermodynamics for many sequences in parallel.
@@ -110,6 +126,9 @@ def calc_heterodimer_py(
     temp_c: float,
     max_loop: int,
     output_structure: bool,
+    dmso_conc: float = 0.0,
+    dmso_fact: float = 0.6,
+    formamide_conc: float = 0.0,
 ) -> ThermoResult:
     """
     Compute heterodimer thermodynamics for two DNA sequences (thal_any alignment).
@@ -131,6 +150,9 @@ def calc_heterodimer_batch_py(
     temp_c: float,
     max_loop: int,
     output_structure: bool,
+    dmso_conc: float = 0.0,
+    dmso_fact: float = 0.6,
+    formamide_conc: float = 0.0,
 ) -> List[ThermoResult]:
     """
     Compute heterodimer thermodynamics for many pairs in parallel.
