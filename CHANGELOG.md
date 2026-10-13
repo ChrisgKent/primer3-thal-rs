@@ -16,7 +16,12 @@ results still match primer3-py 2.3.0.
 - New `ThalError::InvalidBase` for the `nn` functions, which accept only
   A/C/G/T.
 - Python bindings take `dmso_conc`, `dmso_fact` and `formamide_conc` keyword
-  arguments.
+  arguments, and `primer3_thal_rs.pyi` lists them.
+- Degenerate duplexes (a single base, no salt at all) give thal's numbers,
+  as primer3 does, rather than an error; tested against thal and primer3-py.
+- Faster `nn`: a constant Watson-Crick stack table, and `bound_percent` in
+  log space (one `exp`, no overflow). Hairpin and dimer calls skip the GC
+  count unless DMSO or formamide is set.
 
 Breaking: `ThalArgs` and `ThalError` have new fields and variants, so code
 that builds `ThalArgs` with every field listed, or matches `ThalError`

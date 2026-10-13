@@ -51,16 +51,20 @@ fn display_bytes(seq: &[u8], reverse: bool) -> Vec<u8> {
     out
 }
 
-/// GC fraction of all the given sequences together, for the DMSO/formamide
-/// Tm correction.
-fn gc_fraction(seqs: &[&[u8]]) -> f64 {
+/// The DMSO/formamide Tm correction ([`tm_correction`]) on the GC fraction
+/// of all the given sequences together. Zero, without scanning them, when
+/// neither is set.
+fn seq_tm_correction(seqs: &[&[u8]], args: &ThalArgs) -> f64 {
+    if args.dmso_conc == 0.0 && args.formamide_conc == 0.0 {
+        return 0.0;
+    }
     let len: usize = seqs.iter().map(|s| s.len()).sum();
     let gc = seqs
         .iter()
         .flat_map(|s| s.iter())
         .filter(|b| matches!(b.to_ascii_uppercase(), b'G' | b'C'))
         .count();
-    gc as f64 / len as f64
+    tm_correction(gc as f64 / len as f64, args)
 }
 
 /// The two sequences and the entropy/enthalpy DP tables thal fills.

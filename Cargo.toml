@@ -65,3 +65,7 @@ codegen-units = 1
 [profile.bench]
 inherits = "release"
 debug = true
+
+[[bench]]
+name = "nn"
+harness = false

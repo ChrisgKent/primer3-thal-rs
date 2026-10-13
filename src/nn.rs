@@ -18,9 +18,7 @@
 //! # Ok::<(), primer3_thal_rs::ThalError>(())
 //! ```
 
-use std::sync::OnceLock;
-
-use crate::params::{Base, params};
+use crate::params::Base;
 use crate::{ThalArgs, ThalError};
 
 /// Gas constant, cal/K/mol.
@@ -67,13 +65,22 @@ pub fn dna_conc_term(dna_conc: f64, symmetric: bool) -> f64 {
 /// Percentage of oligo bound at `temp_c` °C, from the two-state equilibrium
 /// of a duplex with enthalpy `dh` (cal/mol) and salt-corrected entropy `ds`
 /// (cal/K/mol), as thal reports them in [`ThermoResult`](crate::ThermoResult).
-/// `symmetric` selects the strand concentration as in [`strand_conc`]. 50 at
-/// the duplex's Tm before any DMSO/formamide correction, which does not
-/// enter binding.
+/// 50 at the duplex's Tm before any DMSO/formamide correction, which does
+/// not enter binding.
+///
+/// Only for two strands: a dimer from
+/// [`calc_heterodimer`](crate::calc_heterodimer) or
+/// [`calc_homodimer`](crate::calc_homodimer), or a [`Duplex`]. A hairpin is
+/// unimolecular, so its ΔH/ΔS give a meaningless value here, as does a
+/// result without a structure (ΔH = ΔS = 0); check `structure_found` first.
+/// `symmetric` selects the strand concentration as in [`strand_conc`]: for a
+/// dimer, as thal, `is_self_complementary(seq1) && is_self_complementary(seq2)`.
 pub fn bound_percent(dh: f64, ds: f64, args: &ThalArgs, symmetric: bool, temp_c: f64) -> f64 {
     let t = temp_c + KELVIN_OFFSET;
-    let ka = (-(dh - t * ds) / (R * t)).exp();
-    100.0 / (1.0 + (1.0 / (strand_conc(args.dna_conc, symmetric) * ka)).sqrt())
+    // 100 / (1 + 1/sqrt(c·K)) in log space: one exp, and no overflow of K
+    let ln_ka = -(dh - t * ds) / (R * t);
+    let ln_cka = strand_conc(args.dna_conc, symmetric).ln() + ln_ka;
+    100.0 / (1.0 + (-0.5 * ln_cka).exp())
 }
 
 /// DMSO and formamide Tm correction, °C, as primer3's oligotm:
@@ -123,22 +130,34 @@ fn base(b: u8) -> Result<Base, ThalError> {
 }
 
 /// Watson-Crick nearest-neighbour stacks `[a][b]` = (ΔH, ΔS) of 5'-ab-3'
-/// on its complement, read from thal's own stack table.
-fn wc_stacks() -> &'static [[(f64, f64); 4]; 4] {
-    static STACKS: OnceLock<[[(f64, f64); 4]; 4]> = OnceLock::new();
-    STACKS.get_or_init(|| {
-        let p = params();
-        let bases = [Base::A, Base::C, Base::G, Base::T];
-        let mut out = [[(0.0, 0.0); 4]; 4];
-        for (i, &a) in bases.iter().enumerate() {
-            for (j, &b) in bases.iter().enumerate() {
-                let t = p.stack(a, b, a.complement(), b.complement());
-                out[i][j] = (t.h, t.s);
-            }
-        }
-        out
-    })
-}
+/// on its complement: thal's stack table (SantaLucia 1998) as a constant,
+/// so extending a [`Duplex`] is a plain lookup. Checked against the table.
+const WC_STACKS: [[(f64, f64); 4]; 4] = [
+    [
+        (-7900.0, -22.2),
+        (-8400.0, -22.4),
+        (-7800.0, -21.0),
+        (-7200.0, -20.4),
+    ],
+    [
+        (-8500.0, -22.7),
+        (-8000.0, -19.9),
+        (-10600.0, -27.2),
+        (-7800.0, -21.0),
+    ],
+    [
+        (-8200.0, -22.2),
+        (-9800.0, -24.4),
+        (-8000.0, -19.9),
+        (-8400.0, -22.4),
+    ],
+    [
+        (-7200.0, -21.3),
+        (-8200.0, -22.2),
+        (-8500.0, -22.7),
+        (-7900.0, -22.2),
+    ],
+];
 
 /// A perfectly matched duplex of an oligo with its complement, built one
 /// base at a time (5'->3'): the running nearest-neighbour sums, so adding a
@@ -173,7 +192,7 @@ impl Duplex {
     pub fn push(&mut self, b: u8) -> Result<(), ThalError> {
         let b = base(b)?;
         if let Some(prev) = self.last {
-            let (h, s) = wc_stacks()[prev as usize][b as usize];
+            let (h, s) = WC_STACKS[prev as usize][b as usize];
             self.dh += h;
             self.ds += s;
         }
@@ -214,7 +233,10 @@ impl Duplex {
     /// Melting temperature, °C, including the DMSO/formamide correction.
     /// `symmetric` is whether the oligo is self-complementary
     /// ([`is_self_complementary`]), which halves the strand concentration
-    /// divisor as in thal. NaN if empty.
+    /// divisor as in thal. NaN if empty. Degenerate duplexes give thal's
+    /// numbers, not an error: a single base counts its A-T penalty at both
+    /// ends (`"A"` is about -437 °C), and with no salt at all a single base is
+    /// NaN and longer duplexes -273.15 °C.
     pub fn tm(&self, args: &ThalArgs, symmetric: bool) -> f64 {
         if self.is_empty() {
             return f64::NAN;
@@ -273,15 +295,14 @@ mod tests {
     #[test]
     fn wc_stacks_are_thals_stacks() {
         // AA/TT and CG/GC from SantaLucia 1998, as in thal's stack table
-        assert_eq!(wc_stacks()[0][0], (-7900.0, -22.2));
-        assert_eq!(wc_stacks()[1][2], (-10600.0, -27.2));
-        let p = params();
+        assert_eq!(WC_STACKS[0][0], (-7900.0, -22.2));
+        assert_eq!(WC_STACKS[1][2], (-10600.0, -27.2));
+        let p = crate::params::params();
         let bases = [Base::A, Base::C, Base::G, Base::T];
         for (i, &a) in bases.iter().enumerate() {
             for (j, &b) in bases.iter().enumerate() {
                 let t = p.stack(a, b, a.complement(), b.complement());
-                assert_eq!(wc_stacks()[i][j], (t.h, t.s));
-                assert!(t.h.is_finite() && t.s.is_finite());
+                assert_eq!(WC_STACKS[i][j], (t.h, t.s));
             }
         }
     }

@@ -165,6 +165,11 @@ fn duplex_rejects_bad_input() {
         Err(ThalError::InvalidBase('N'))
     );
     assert_eq!(Duplex::new().push(b'-'), Err(ThalError::InvalidBase('-')));
+    // The error keeps the input's case
+    assert_eq!(
+        nn::duplex_tm("acgn", &args),
+        Err(ThalError::InvalidBase('n'))
+    );
 }
 
 #[test]
@@ -266,4 +271,124 @@ fn dmso_and_formamide_shift_only_tm() {
     let none = calc_hairpin("AAAAAAAAAA", &corrected, false).unwrap();
     assert!(!none.structure_found);
     assert_eq!(none.tm, 0.0);
+}
+
+/// Every ACGT sequence of 1 to 4 nt, then random ones of 5 to 14 nt.
+fn short_seqs() -> Vec<Vec<u8>> {
+    let mut seqs: Vec<Vec<u8>> = vec![vec![]];
+    let mut all = Vec::new();
+    for _ in 0..4 {
+        seqs = seqs
+            .iter()
+            .flat_map(|s| {
+                b"ACGT".iter().map(move |&b| {
+                    let mut s = s.clone();
+                    s.push(b);
+                    s
+                })
+            })
+            .collect();
+        all.extend(seqs.iter().cloned());
+    }
+    let mut state = 23u64;
+    for _ in 0..200 {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let len = 5 + (state >> 33) as usize % 10;
+        all.extend(random_seqs(1, state).into_iter().map(|s| s[..len].to_vec()));
+    }
+    all
+}
+
+/// Equal, or both NaN.
+fn same(a: f64, b: f64, tol: f64) -> bool {
+    (a.is_nan() && b.is_nan()) || (a - b).abs() < tol || a == b
+}
+
+#[test]
+fn short_duplexes_match_thal() {
+    // Below primer length the duplex model still gives thal's numbers,
+    // however unphysical (a single base pair has a Tm far below 0 °C)
+    let seqs = short_seqs();
+    assert_eq!(seqs.len(), 4 + 16 + 64 + 256 + 200);
+    for args in conditions() {
+        for seq in &seqs {
+            let thal = calc_heterodimer(seq, rc(seq), &args, false).unwrap();
+            let label = String::from_utf8_lossy(seq);
+            assert!(thal.structure_found, "{label}");
+            let tm = nn::duplex_tm(seq, &args).unwrap();
+            assert!(
+                same(tm, thal.tm, 1e-9),
+                "{label}: {tm} vs thal {} ({args:?})",
+                thal.tm
+            );
+            let symmetric = nn::is_self_complementary(seq);
+            let bound = nn::bound_percent(thal.dh, thal.ds, &args, symmetric, 60.0);
+            let duplex = nn::duplex_annealing(seq, &args, 60.0).unwrap();
+            assert!(same(bound, duplex, 1e-9), "{label}: {bound} vs {duplex}");
+        }
+    }
+}
+
+#[test]
+fn single_bases_match_primer3() {
+    // primer3-py 2.3.0: calc_heterodimer(seq, reverse_complement(seq)).tm at
+    // its defaults. A single base takes the terminal A-T penalty at both ends
+    let args = ThalArgs::default();
+    for (seq, primer3) in [
+        ("A", -437.0719),
+        ("C", -277.9276),
+        ("AT", -217.0828),
+        ("ACGT", -43.5526),
+    ] {
+        let tm = nn::duplex_tm(seq, &args).unwrap();
+        assert!(
+            (tm - primer3).abs() < 1e-3,
+            "{seq}: {tm} vs primer3 {primer3}"
+        );
+    }
+}
+
+#[test]
+fn zero_salt_matches_thal() {
+    // No cations: ln(0) in the salt correction. thal (and primer3) give NaN
+    // for one base pair, where 0 · -inf appears, and -273.15 °C otherwise
+    let args = ThalArgs {
+        mv: 0.0,
+        dv: 0.0,
+        ..ThalArgs::default()
+    };
+    for seq in ["A", "AC", "ACGTACGTAC"] {
+        let s = seq.as_bytes();
+        let thal = calc_heterodimer(s, rc(s), &args, false).unwrap().tm;
+        let tm = nn::duplex_tm(seq, &args).unwrap();
+        assert!(same(tm, thal, 1e-9), "{seq}: {tm} vs thal {thal}");
+    }
+    assert!(nn::duplex_tm("A", &args).unwrap().is_nan());
+    assert_eq!(nn::duplex_tm("AC", &args).unwrap(), -nn::KELVIN_OFFSET);
+}
+
+#[test]
+fn bound_percent_saturates() {
+    let args = conditions()[1];
+    for seq in random_seqs(50, 29) {
+        let d = Duplex::from_seq(&seq).unwrap();
+        let mut last = 100.0;
+        for t in 0..=120 {
+            let bound = d.annealing(&args, false, f64::from(t));
+            assert!((0.0..=100.0).contains(&bound), "{bound} at {t} °C");
+            assert!(bound <= last, "not decreasing at {t} °C");
+            last = bound;
+        }
+        assert!(d.annealing(&args, false, -50.0) > 99.999);
+        assert!(d.annealing(&args, false, 200.0) < 1e-3);
+    }
+    // ΔH/ΔS far beyond any oligo still give a finite answer, not NaN
+    for (dh, ds) in [(-1e6, -2.5e3), (1e6, 2.5e3), (-1e6, 0.0), (1e6, 0.0)] {
+        for t in [-50.0, 37.0, 200.0] {
+            let bound = nn::bound_percent(dh, ds, &args, false, t);
+            assert!((0.0..=100.0).contains(&bound), "{dh} {ds} at {t}: {bound}");
+        }
+    }
 }

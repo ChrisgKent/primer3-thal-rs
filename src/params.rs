@@ -31,6 +31,7 @@ impl Base {
     }
 
     /// Watson-Crick partner; `N` for `N`.
+    #[cfg(test)]
     pub fn complement(self) -> Base {
         match self {
             Base::A => Base::T,

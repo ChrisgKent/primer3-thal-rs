@@ -2,8 +2,7 @@
 //! tracebacku, calcHairpin.
 
 use super::{
-    Context, Mode, display_bytes, draw, encode, gc_fraction, no_structure, salt_correction,
-    tm_correction,
+    Context, Mode, display_bytes, draw, encode, no_structure, salt_correction, seq_tm_correction,
 };
 use crate::thermo::{Init, Thermo};
 use crate::{
@@ -40,8 +39,7 @@ pub(super) fn calc(seq: &[u8], args: &ThalArgs, output_structure: bool) -> Therm
     if best.s.is_finite() {
         let pairs = bp[..len - 1].iter().filter(|&&p| p > 0).count();
         let salt = ((pairs / 2) as f64 - 1.0) * salt_correction(args);
-        result.tm =
-            (best.h / (best.s + salt)) - KELVIN_OFFSET + tm_correction(gc_fraction(&[seq]), args);
+        result.tm = (best.h / (best.s + salt)) - KELVIN_OFFSET + seq_tm_correction(&[seq], args);
         result.dg = best.h - (args.temp * (best.s + salt));
         result.dh = best.h;
         result.ds = best.s + salt;

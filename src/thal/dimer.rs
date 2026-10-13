@@ -1,7 +1,7 @@
 //! Dimer alignment (thal.c `thal_any`): fillMatrix, traceback, calcDimer.
 
 use super::{
-    Context, display_bytes, draw, encode, gc_fraction, no_structure, salt_correction, tm_correction,
+    Context, display_bytes, draw, encode, no_structure, salt_correction, seq_tm_correction,
 };
 use crate::nn::{dna_conc_term, is_self_complementary};
 use crate::thermo::{Init, Thermo};
@@ -67,8 +67,7 @@ pub(super) fn calc(
     let salt = salt_correction(args);
     ThermoResult {
         structure_found: true,
-        tm: (dh / (ds + (n * salt) + rc)) - KELVIN_OFFSET
-            + tm_correction(gc_fraction(&[seq1, seq2]), args),
+        tm: (dh / (ds + (n * salt) + rc)) - KELVIN_OFFSET + seq_tm_correction(&[seq1, seq2], args),
         dg: dh - (args.temp * (ds + (n * salt))),
         dh,
         ds: ds + (n * salt),
