@@ -11,6 +11,8 @@ results still match primer3-py 2.3.0.
   duplex (constants, salt and DMSO/formamide corrections, `duplex_tm`,
   `duplex_annealing`, and the incremental `Duplex`). Its Tm equals
   `calc_heterodimer(seq, reverse_complement(seq)).tm`.
+- `nn::bound_percent`: percentage bound at a temperature from a ΔH/ΔS, such
+  as a `ThermoResult`'s, on the same terms as `duplex_annealing`.
 - New `ThalError::InvalidBase` for the `nn` functions, which accept only
   A/C/G/T.
 - Python bindings take `dmso_conc`, `dmso_fact` and `formamide_conc` keyword

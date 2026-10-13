@@ -64,6 +64,18 @@ pub fn dna_conc_term(dna_conc: f64, symmetric: bool) -> f64 {
     R * strand_conc(dna_conc, symmetric).ln()
 }
 
+/// Percentage of oligo bound at `temp_c` °C, from the two-state equilibrium
+/// of a duplex with enthalpy `dh` (cal/mol) and salt-corrected entropy `ds`
+/// (cal/K/mol), as thal reports them in [`ThermoResult`](crate::ThermoResult).
+/// `symmetric` selects the strand concentration as in [`strand_conc`]. 50 at
+/// the duplex's Tm before any DMSO/formamide correction, which does not
+/// enter binding.
+pub fn bound_percent(dh: f64, ds: f64, args: &ThalArgs, symmetric: bool, temp_c: f64) -> f64 {
+    let t = temp_c + KELVIN_OFFSET;
+    let ka = (-(dh - t * ds) / (R * t)).exp();
+    100.0 / (1.0 + (1.0 / (strand_conc(args.dna_conc, symmetric) * ka)).sqrt())
+}
+
 /// DMSO and formamide Tm correction, °C, as primer3's oligotm:
 /// `-dmso_conc·dmso_fact + (0.453·gc_fraction - 2.88)·formamide_conc`.
 /// Zero with the default [`ThalArgs`].
@@ -222,9 +234,7 @@ impl Duplex {
             return f64::NAN;
         }
         let (dh, ds) = self.thermo(args);
-        let t = temp_c + KELVIN_OFFSET;
-        let ka = (-(dh - t * ds) / (R * t)).exp();
-        100.0 / (1.0 + (1.0 / (strand_conc(args.dna_conc, symmetric) * ka)).sqrt())
+        bound_percent(dh, ds, args, symmetric, temp_c)
     }
 }
 

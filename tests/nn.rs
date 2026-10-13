@@ -107,6 +107,29 @@ fn duplex_tm_equals_thal_heterodimer_with_complement() {
 }
 
 #[test]
+fn bound_percent_from_thal_dimer_equals_duplex_annealing() {
+    // thal's ΔH and (salt-corrected) ΔS for a primer with its complement give
+    // the same binding as the duplex model, at any temperature
+    let mut seqs = random_seqs(200, 13);
+    seqs.extend(palindromes());
+    for args in conditions() {
+        for seq in &seqs {
+            let thal = calc_heterodimer(seq, rc(seq), &args, false).unwrap();
+            let symmetric = nn::is_self_complementary(seq);
+            for t in [45.0, 60.0, 72.0] {
+                let bound = nn::bound_percent(thal.dh, thal.ds, &args, symmetric, t);
+                let duplex = nn::duplex_annealing(seq, &args, t).unwrap();
+                assert!(
+                    (bound - duplex).abs() < 1e-9,
+                    "{}: {bound} vs {duplex} at {t} °C",
+                    String::from_utf8_lossy(seq)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn duplex_built_base_by_base_matches_whole_sequence() {
     let args = conditions()[5];
     for seq in random_seqs(100, 3) {
